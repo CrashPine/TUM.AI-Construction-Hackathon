@@ -15,6 +15,18 @@ _MASK = re.compile(r"(1+)(2*)(3*)(4*)(P+)(I?)")
 
 
 @dataclass
+class ItemRecords:
+    """Physical records contributing to one parsed item.
+
+    :ivar position: the 21 record, or its 23 record in a price-only file.
+    :ivar price: the latest effective 23 record, if any.
+    """
+
+    position: tuple[int, str]
+    price: tuple[int, str] | None = None
+
+
+@dataclass
 class _Draft:
     """An item while its records are read."""
 
@@ -27,7 +39,13 @@ class _Draft:
     total: Decimal | None = None
 
 
-def parse_gaeb90(data: bytes, source: str, *, records: dict | None = None) -> BoQ:
+def parse_gaeb90(
+    data: bytes,
+    source: str,
+    *,
+    records: dict | None = None,
+    item_records: list[ItemRecords] | None = None,
+) -> BoQ:
     """Parse a GAEB 90 bill of quantities.
 
     Sections come from the 11/12 records; a file without them gets a section, with an empty
@@ -36,9 +54,10 @@ def parse_gaeb90(data: bytes, source: str, *, records: dict | None = None) -> Bo
     :param data: the file content.
     :param source: the file name, for the result and for error messages.
     :param records: optional evidence index for position, price and total records.
+    :param item_records: optional list, appended once per item in document order.
     :returns: the BoQ with its sections and items in document order.
     :raises ValueError: if the file has no 00 record or no valid OZ mask in it, if a 23 record
-        does not follow the 21 record of its item, or if the file has no 21 record.
+        does not follow the 21 record of its item, or if the file has no items.
     """
     lines = _decode(data).split("\r\n")
     header = next((line for line in lines if line.startswith("00")), None)
@@ -67,9 +86,13 @@ def parse_gaeb90(data: bytes, source: str, *, records: dict | None = None) -> Bo
             drafts.append(
                 _Draft(_oz(line[2:11], widths), _number(line[23:34], 3), line[34:38].strip())
             )
+            if item_records is not None:
+                item_records.append(ItemRecords((number, line)))
         elif kind == "23":
             if prices_only:
                 drafts.append(_Draft(_oz(line[2:11], widths), None, ""))
+                if item_records is not None:
+                    item_records.append(ItemRecords((number, line)))
             if not drafts or drafts[-1].oz != _oz(line[2:11], widths):
                 raise ValueError(f"{source}: 23 record {line[2:11]!r} without its 21 record")
             # The unit price has 3 decimals in 11 digits, or 2 in 10 digits and a blank.
@@ -78,6 +101,8 @@ def parse_gaeb90(data: bytes, source: str, *, records: dict | None = None) -> Bo
                 _number(price, 2 if price.endswith(" ") else 3) if price.strip() else None
             )
             drafts[-1].total = _number(line[24:36], 2) if line[24:36].strip() else None
+            if item_records is not None:
+                item_records[-1].price = (number, line)
         elif kind == "25" and drafts:
             drafts[-1].short.append(line[2:74].rstrip())
         elif kind == "26" and drafts:

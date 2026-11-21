@@ -20,8 +20,16 @@ from boqcheck import semantic
 from boqcheck.docx_context import read_context
 from boqcheck.history import initialize, promote, replay
 from boqcheck.web import make_app
+from boqcheck.web_gaeb import review_legacy
 
 _ROOF = Path(__file__).resolve().parents[1] / "data" / "raw" / "LV_09_Porenbetondach.pdf"
+_INCOMPLETE = (
+    "2101010010 NNN         00000001000St",
+    "2101010020 NNN         00000001000St",
+    "2301010020  00000001000 000000000100",
+    "320101      000000000200",
+    "99000000000200",
+)
 
 
 def _request(
@@ -47,6 +55,37 @@ def _request(
     response: list = []
     body = b"".join(app(environ, lambda status, headers: response.extend((status, dict(headers)))))
     return response[0], response[1], body
+
+
+def _legacy(phase: str, *rows: str, prefix: tuple[str, ...] = ()) -> bytes:
+    r"""Build synthetic fixed-width GAEB 90 records.
+
+    :param phase: exchange phase in the header.
+    :param \*rows: records following the header.
+    :param prefix: records before the header.
+    :returns: 80-column records separated by CRLF.
+    """
+    header = f"00        {phase}L".ljust(62) + "1122PPPPI90"
+    records = (*prefix, header, *rows)
+    text = "\r\n".join(f"{row:<74.74}{n:06d}" for n, row in enumerate(records, 1)) + "\r\n"
+    return text.encode()
+
+
+def _duplicate_priced_d84() -> tuple[bytes, list[int], list[int]]:
+    """Duplicate the second position's OZ and increase only its total by one cent.
+
+    :returns: modified file bytes and the zero-based 21 and 23 line indexes.
+    """
+    rows = _ROOF.with_name("Angebot AN24-0305.D84").read_bytes().splitlines()
+    positions = [i for i, row in enumerate(rows) if row.startswith(b"21")][:2]
+    prices = [i for i, row in enumerate(rows) if row.startswith(b"23")][:2]
+    assert positions[0] < prices[0] < positions[1] < prices[1]
+    for first, second in (positions, prices):
+        rows[second] = rows[second][:2] + rows[first][2:11] + rows[second][11:]
+    second_price = rows[prices[1]]
+    total = int(second_price[24:36]) + 1
+    rows[prices[1]] = second_price[:24] + f"{total:012d}".encode() + second_price[36:]
+    return b"\r\n".join(rows) + b"\r\n", positions, prices
 
 
 def test_upload_review_and_report(tmp_path: Path) -> None:
@@ -116,10 +155,185 @@ def test_legacy_upload(tmp_path: Path, name: str, count: int, checked: int) -> N
     assert f"GAEB 90 · Phase {name[-2:]} · {count} Positionen" in page
     assert f"Preisprüfung: {checked} Gesamtbeträge geprüft" in page and 'id="record-' in page
     report = _request(app, run + "/report?download=1")[2].decode()
+    for rendered in (page, report):
+        assert "Experimentell" in rendered and "genau eine Mengeneinheit" in rendered
+        assert "Positionsarten und Preisbasen" in rendered
     if name.endswith("D83"):
         assert "Für D83 ist das zulässig" in report and "Keine aktiven Befunde" in report
     if name == "StBALV23040.D84":
         assert "249 übersprungen" in report
+
+
+def test_legacy_duplicate_occurrences_are_editable_and_source_backed(tmp_path: Path) -> None:
+    """Link both duplicate 21 records and preserve the edited finding in the report.
+
+    :param tmp_path: isolated web storage.
+    """
+    data, positions, _ = _duplicate_priced_d84()
+    result = review_legacy("test.D84", data)
+    duplicates = [f for f in result["findings"] if f["assessment"] == "Doppelte OZ"]
+    assert len(duplicates) == 1
+    duplicate = duplicates[0]
+    assert duplicate["category"] == "LV-Struktur"
+    assert [s["record"] for s in duplicate["sources"]] == [i + 1 for i in positions]
+    assert all(f["assessment"] != "Pflichtfelder fehlen" for f in result["findings"])
+
+    app = make_app(tmp_path)
+    status, headers, _ = _request(app, "/upload?name=test.D84", data, "application/octet-stream")
+    assert status.startswith("303")
+    run = headers["Location"]
+    page = _request(app, run)[2].decode()
+    article = page.split(f'<article id="{duplicate["id"]}">', 1)[1].split("</article>", 1)[0]
+    assert re.findall(r'href="#record-(\d+)"', article) == [str(i + 1) for i in positions]
+    form = {f"status-{f['id']}": "open" for f in result["findings"]}
+    form[f"status-{duplicate['id']}"] = "confirmed"
+    form[f"question-{duplicate['id']}"] = "Welche OZ gilt?"
+    assert _request(app, run, urlencode(form).encode(), "application/x-www-form-urlencoded")[
+        0
+    ].startswith("303")
+    report = _request(app, run + "/report?download=1")[2].decode()
+    assert "Doppelte OZ" in report and "Welche OZ gilt?" in report and "Bestätigt" in report
+    assert all(f"Zeile {i + 1} · Satz 21" in report for i in positions)
+    assert 'href="#record-' not in report
+
+
+def test_legacy_duplicate_price_attribution_uses_the_item_occurrence() -> None:
+    """A mismatch cites only the changed occurrence, not both items with the same OZ."""
+    data, positions, prices = _duplicate_priced_d84()
+    result = review_legacy("test.D84", data)
+    line = next(f for f in result["findings"] if f["explanation"].startswith("Position "))
+    assert [s["record"] for s in line["sources"]] == [positions[1] + 1, prices[1] + 1]
+
+
+def test_legacy_duplicate_price_only_occurrences_cite_both_23_records() -> None:
+    """A price-only D84 treats each 23 as a distinct position, even for equal OZs."""
+    rows = _ROOF.with_name("StBALV23040.D84").read_bytes().splitlines()
+    prices = [i for i, row in enumerate(rows) if row.startswith(b"23")][:2]
+    assert not any(row.startswith(b"21") for row in rows)
+    rows[prices[1]] = rows[prices[1]][:2] + rows[prices[0]][2:11] + rows[prices[1]][11:]
+    result = review_legacy("test.D84", b"\r\n".join(rows) + b"\r\n")
+    duplicates = [f for f in result["findings"] if f["assessment"] == "Doppelte OZ"]
+    assert len(duplicates) == 1
+    assert [s["record"] for s in duplicates[0]["sources"]] == [i + 1 for i in prices]
+    assert (result["gaeb"]["arithmetic_checked"], result["gaeb"]["arithmetic_skipped"]) == (0, 249)
+
+
+@pytest.mark.parametrize(
+    ("finding_index", "expected"),
+    [(0, {3, 5}), (1, {5, 7, 11}), (2, {5, 7, 9, 13})],
+)
+def test_legacy_calculations_cite_only_effective_records(
+    tmp_path: Path, finding_index: int, expected: set[int]
+) -> None:
+    """Repeated 23, 32 and 99 records cite the last values and exactly the relevant items.
+
+    :param tmp_path: isolated web storage.
+    :param finding_index: line, section or grand-total finding.
+    :param expected: contributing physical record numbers.
+    """
+    data = _legacy(
+        "84",
+        "2101010010 NNN         00000001000St",
+        "2301010010  00000001000 000000000100",
+        "2301010010  00000001000 000000000200",
+        "2101010020 NNN         00000001000St",
+        "2301010020  00000001000 000000000100",
+        "2101100001 NNN         00000001000St",
+        "2301100001  00000001000 000000000100",
+        "320101      000000000300",
+        "320101      000000000400",
+        "99000000000400",
+        "99000000000500",
+        prefix=("T0Free text before the header",),
+    )
+    result = review_legacy("test.D84", data)
+    assert len(result["findings"]) == 3
+    assert {s["record"] for s in result["findings"][finding_index]["sources"]} == expected
+    numbers = [number for number, _, _ in result["records"]]
+    assert len(numbers) == len(set(numbers))
+    app = make_app(tmp_path)
+    _, headers, _ = _request(app, "/upload?name=test.D84", data, "application/octet-stream")
+    page = _request(app, headers["Location"])[2].decode()
+    assert all(page.count(f'id="record-{number}"') == 1 for number in numbers)
+
+
+def test_legacy_real_section_sums_include_all_item_sources(tmp_path: Path) -> None:
+    """Keep complete source evidence for both discrepant sections of the real D86.
+
+    :param tmp_path: isolated web storage.
+    """
+    path = _ROOF.with_name("StBALV23040.D86")
+    data = path.read_bytes()
+    findings = review_legacy(path.name, data)["findings"]
+    assert [len(f["sources"]) for f in findings] == [32, 24]
+    for finding in findings:
+        assert finding["sources"][0]["excerpt"].startswith("32")
+        assert all(source["excerpt"].startswith("23") for source in finding["sources"][1:])
+
+    app = make_app(tmp_path)
+    _, headers, _ = _request(
+        app, f"/upload?{urlencode({'name': path.name})}", data, "application/octet-stream"
+    )
+    run = headers["Location"]
+    page = _request(app, run)[2].decode()
+    report = _request(app, run + "/report?download=1")[2].decode()
+    for finding in findings:
+        article = page.split(f'<article id="{finding["id"]}">', 1)[1].split("</article>", 1)[0]
+        assert set(re.findall(r'href="#record-(\d+)"', article)) == {
+            str(source["record"]) for source in finding["sources"]
+        }
+        assert all(source["reference"] in report for source in finding["sources"])
+
+
+@pytest.mark.parametrize("phase", ("84", "83"))
+def test_legacy_unpriced_items_count_as_skipped_except_for_unpriced_d83(phase: str) -> None:
+    """Report absent price records in priced files without changing unpriced D83 coverage.
+
+    :param phase: exchange phase of a partially priced file.
+    """
+    result = review_legacy(f"test.D{phase}", _legacy(phase, *_INCOMPLETE))
+    assert (result["gaeb"]["arithmetic_checked"], result["gaeb"]["arithmetic_skipped"]) == (1, 1)
+    unpriced = review_legacy("test.D83", _legacy("83", *_INCOMPLETE[:2]))
+    assert (unpriced["gaeb"]["arithmetic_checked"], unpriced["gaeb"]["arithmetic_skipped"]) == (
+        0,
+        0,
+    )
+
+
+def test_legacy_wholly_unpriced_d84_items_are_skipped() -> None:
+    """Count even a wholly unpriced D84 as uncheckable rather than intentionally unpriced."""
+    result = review_legacy("test.D84", _legacy("84", *_INCOMPLETE[:2]))
+    assert (result["gaeb"]["arithmetic_checked"], result["gaeb"]["arithmetic_skipped"]) == (0, 2)
+
+
+def test_legacy_inconclusive_sums_are_neutral_and_source_backed(tmp_path: Path) -> None:
+    """Explain missing operands with the 21 record in the review and standalone report.
+
+    :param tmp_path: isolated web storage.
+    """
+    data = _legacy("84", *_INCOMPLETE)
+    result = review_legacy("test.D84", data)
+    assert len(result["findings"]) == 2
+    section, total = result["findings"]
+    assert {f["assessment"] for f in (section, total)} == {"Summe nicht prüfbar"}
+    assert {f["category"] for f in (section, total)} == {"Prüfumfang"}
+    assert {s["record"] for s in section["sources"]} == {2, 4, 5}
+    assert {s["record"] for s in total["sources"]} == {2, 4, 6}
+    app = make_app(tmp_path)
+    _, headers, _ = _request(app, "/upload?name=test.D84", data, "application/octet-stream")
+    run = headers["Location"]
+    page = _request(app, run)[2].decode()
+    form = {f"status-{f['id']}": "open" for f in result["findings"]}
+    form[f"question-{section['id']}"] = "Welcher Betrag fehlt?"
+    assert _request(app, run, urlencode(form).encode(), "application/x-www-form-urlencoded")[
+        0
+    ].startswith("303")
+    report = _request(app, run + "/report?download=1")[2].decode()
+    for number in (2, 4, 5, 6):
+        assert f'href="#record-{number}"' in page
+        assert f"Zeile {number} · Satz" in report
+    assert "Summe nicht prüfbar" in report and "Rechenabweichung" not in report
+    assert "Welcher Betrag fehlt?" in report
 
 
 def test_legacy_price_evidence(tmp_path: Path) -> None:
@@ -138,6 +352,8 @@ def test_legacy_price_evidence(tmp_path: Path) -> None:
     run = headers["Location"]
     page = _request(app, run)[2].decode()
     assert f'href="#record-{index + 1}"' in page
+    assert "Mögliche Rechenabweichung" in page
+    assert "Positionsarten und Preisbasen sind nicht vollständig erkannt" in page
     form = dict.fromkeys(re.findall(r'name="(status-BG-\d+)"', page), "open")
     form.update({"status-BG-001": "confirmed", "question-BG-001": "Bitte Preis klären."})
     fields = urlencode(form)
@@ -146,6 +362,8 @@ def test_legacy_price_evidence(tmp_path: Path) -> None:
     )
     report = _request(app, run + "/report?download=1")[2].decode()
     assert "72000.01" in report and "Bitte Preis klären." in report
+    assert "Mögliche Rechenabweichung" in report
+    assert "Positionsarten und Preisbasen sind nicht vollständig erkannt" in report
     assert rows[index].decode("ascii") in report
     assert _request(app, "/upload?name=test.D83", data, "application/octet-stream")[0].startswith(
         "400"

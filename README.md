@@ -6,8 +6,8 @@ Construction Hackathon.
 We build a prototype that reads long bills of quantities (BoQs; German *Leistungsverzeichnis*, LV),
 finds errors and risks in them and gives the estimator a risk report before the bid.
 
-**Status (2026-11-21):** the Python package `boqcheck` reads GAEB DA XML files (`.X83`) into a
-BoQ data model. Checks, the risk report and the upload page do not exist yet.
+**Status:** `boqcheck` reviews supported PDF and GAEB files locally, with source-backed findings
+and a standalone HTML risk report.
 [AGENTS.md](AGENTS.md) has the commands and the rules for coding agents.
 
 ## Local PDF contradiction review
@@ -30,9 +30,13 @@ and a print action which opens the browser's Save as PDF dialog.
 
 The same upload form accepts GAEB X83 (3.1 or 3.2). It shows normalized positions, structural
 findings and price-check coverage and exports the shared HTML report. GAEB 90 uploads
-(D83, D84 and D86) use the same review and export. Price findings cite physical lines in
-the uploaded file. A price-only D84 displays the supplied prices and reports missing
-quantities. An optional DOCX attachment belongs to the uploaded LV. Open its source list,
+(D83, D84 and D86) use the same review and export. Duplicate OZs and price findings cite their
+individual physical records; sums cite their stated total and contributing item records.
+Uncheckable sums are reported separately, and unpriced positions in priced files count as skipped.
+The experimental price check assumes one quantity unit per unit price: position types and price
+bases are not fully recognized, so discrepancies require review. A numbering gap is only a hint,
+not proof of missing work. A price-only D84 displays prices and reports missing quantities.
+An optional DOCX attachment belongs to the uploaded LV. Open its source list,
 select a paragraph or table cell for a finding, and save the review to include that excerpt
 in the HTML report. For PDFs, an attached DOCX also supports automatic comparison of explicitly labelled fields.
 Use the same OZ and component title, followed by a property such as a thickness in the next

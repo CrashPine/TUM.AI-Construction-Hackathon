@@ -88,6 +88,21 @@ def test_line_with_a_missing_operand_is_inconclusive() -> None:
     ]
 
 
+def test_line_findings_identify_the_original_item_occurrence() -> None:
+    """Duplicate OZs retain distinct 1-based indexes, including after a correct item."""
+    items = (
+        _item("01.1", "1", "1", "1"),
+        _item("01.1", "1", "1", "2"),
+        _item("02.1", None, "2", "4"),
+    )
+    findings = check_calculations(BoQ("x", None, (Section("01", "", Decimal("4")),), items))
+    assert [(f.kind, f.status, f.item_index) for f in findings] == [
+        ("line", "mismatch", 2),
+        ("line", "inconclusive", 3),
+        ("section", "mismatch", None),
+    ]
+
+
 def test_sum_with_a_missing_item_total_is_inconclusive() -> None:
     """A sum over an item without a total cannot be checked."""
     items = (_item("01.1", "1", "5", "5"), _item("01.2", "1", None, None))
@@ -114,7 +129,8 @@ def test_grand_total_mismatch_and_gap_hint() -> None:
     [finding] = check_calculations(boq)
     assert (finding.kind, finding.oz, finding.status) == ("total", "", "mismatch")
     assert (finding.stated, finding.computed) == (Decimal("15"), Decimal("10"))
-    assert finding.explanation.endswith("Fehlende Ordnungszahlen: 01.0020.")
+    assert "Lücken in der OZ-Nummerierung (01.0020)" in finding.explanation
+    assert "kein Nachweis fehlender Leistungen" in finding.explanation
 
 
 def test_sum_with_a_provisional_item_is_inconclusive() -> None:

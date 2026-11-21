@@ -1,8 +1,8 @@
 """Adapt the GAEB checker result to the shared web review contract."""
 
 from . import parse
-from .calculation import check_calculations
-from .gaeb90 import parse_gaeb90
+from .calculation import CalculationFinding, check_calculations
+from .gaeb90 import ItemRecords, parse_gaeb90
 from .gaeb_checks import check_boq
 from .model import BoQ
 
@@ -104,45 +104,76 @@ def review_legacy(name: str, data: bytes) -> dict:
     :returns: shared review result with physical line numbers and source records.
     :raises ValueError: when the phase marker and extension differ.
     """
-    records = {}
-    boq = parse_gaeb90(data, name, records=records)
+    records: dict[tuple[str, str], list[tuple[int, str]]] = {}
+    item_records: list[ItemRecords] = []
+    boq = parse_gaeb90(data, name, records=records, item_records=item_records)
     if boq.phase != name[-2:]:
         raise ValueError("Dateiendung und Austauschphase in Satz 00 stimmen nicht überein.")
     priced = [item for item in boq.items if item.total is not None or item.unit_price is not None]
     issues = check_calculations(boq)
-    skipped = sum(issue.kind == "line" and issue.status == "inconclusive" for issue in issues)
-    warnings = []
+    line_skipped = sum(issue.kind == "line" and issue.status == "inconclusive" for issue in issues)
+    unpriced = len(boq.items) - len(priced) if boq.phase != "83" or priced else 0
+    skipped = line_skipped + unpriced
+    warnings = [
+        "Experimentell: Die Preisprüfung nimmt an, dass der Einheitspreis für genau eine "
+        "Mengeneinheit gilt. Positionsarten und Preisbasen sind nicht vollständig erkannt."
+    ]
     if skipped:
-        warnings.append(f"{skipped} Positionsbeträge ohne vergleichbare Menge oder Preisangaben.")
+        warnings.append(
+            f"{skipped} Positionsprüfungen wegen fehlender Mengen oder Preise übersprungen."
+        )
     open_sums = sum(issue.kind != "line" and issue.status == "inconclusive" for issue in issues)
     if open_sums:
         warnings.append(f"{open_sums} ausgewiesene Summen sind nicht prüfbar.")
     findings = []
-    for issue in issues:
-        if issue.status != "mismatch":
+    for duplicate in check_boq(boq)["findings"]:
+        if duplicate["code"] != "duplicate_oz":
             continue
-        kind = {"line": "23", "section": "32", "total": "99"}[issue.kind]
-        keys = [("21", issue.oz), (kind, issue.oz)] if issue.kind == "line" else [(kind, issue.oz)]
-        sources = [
-            {
-                "record": i,
-                "reference": f"Zeile {i} · Satz {code} · {oz or 'Gesamtsumme'}",
-                "excerpt": raw,
-            }
-            for code, oz in keys
-            for i, raw in records.get((code, oz), [])
-        ]
         findings.append(
             {
                 "id": f"BG-{len(findings) + 1:03d}",
-                "assessment": "Rechenabweichung",
-                "category": "Preisprüfung",
+                "assessment": _TITLES["duplicate_oz"],
+                "category": "LV-Struktur",
+                "method": "GAEB-90-Strukturprüfung",
+                "evidence": "Gleiche Ordnungszahl in mehreren GAEB-90-Positionssätzen",
+                "impact": _IMPACTS["duplicate_oz"],
+                "explanation": _explanation(duplicate),
+                "question": "Welche Ordnungszahl gilt für die betroffenen Positionen?",
+                "sources": [
+                    _legacy_source(item_records[index - 1].position, boq.items[index - 1].oz)
+                    for index in duplicate["items"]
+                ],
+            }
+        )
+    for issue in issues:
+        if issue.kind == "line" and issue.status == "inconclusive":
+            continue
+        mismatch = issue.status == "mismatch"
+        findings.append(
+            {
+                "id": f"BG-{len(findings) + 1:03d}",
+                "assessment": "Mögliche Rechenabweichung" if mismatch else "Summe nicht prüfbar",
+                "category": "Preisprüfung" if mismatch else "Prüfumfang",
                 "method": "GAEB-90-Preisprüfung",
                 "evidence": "Ausgewiesene Werte aus der hochgeladenen Datei",
-                "impact": "Die Abweichung kann die Angebotssumme ändern.",
-                "explanation": issue.explanation,
-                "question": "Welcher Betrag ist anzusetzen?",
-                "sources": sources,
+                "impact": (
+                    "Bei zutreffender Zuordnung kann sich die Angebotssumme ändern."
+                    if mismatch
+                    else "Die Summe lässt sich mit den verfügbaren Positionsbeträgen nicht prüfen."
+                ),
+                "explanation": issue.explanation
+                + (
+                    " Positionsarten und Preisbasen sind nicht vollständig erkannt; "
+                    "der Vergleich ist vorläufig."
+                    if mismatch
+                    else ""
+                ),
+                "question": (
+                    "Welche Positionsart und Preisbasis gelten, und welcher Betrag ist anzusetzen?"
+                    if mismatch
+                    else "Welche Werte sind für die Summenprüfung maßgeblich?"
+                ),
+                "sources": _calculation_sources(issue, boq, records, item_records),
             }
         )
     return {
@@ -153,7 +184,7 @@ def review_legacy(name: str, data: bytes) -> dict:
             "version": "90",
             "phase": boq.phase,
             "items": len(boq.items),
-            "arithmetic_checked": len(priced) - skipped,
+            "arithmetic_checked": len(priced) - line_skipped,
             "arithmetic_skipped": skipped,
         },
         "records": sorted(
@@ -162,3 +193,49 @@ def review_legacy(name: str, data: bytes) -> dict:
             for i, raw in lines
         ),
     }
+
+
+def _legacy_source(record: tuple[int, str], oz: str) -> dict:
+    """Describe one physical GAEB 90 record as a finding source.
+
+    :param record: 1-based line number and its original text.
+    :param oz: item or section OZ, or empty for a grand total.
+    :returns: source reference and verbatim excerpt.
+    """
+    number, raw = record
+    return {
+        "record": number,
+        "reference": f"Zeile {number} · Satz {raw[:2]} · {oz or 'Gesamtsumme'}",
+        "excerpt": raw,
+    }
+
+
+def _calculation_sources(
+    issue: CalculationFinding,
+    boq: BoQ,
+    records: dict[tuple[str, str], list[tuple[int, str]]],
+    item_records: list[ItemRecords],
+) -> list[dict]:
+    """Select the effective source records used for a calculation.
+
+    :param issue: line, section or grand-total finding.
+    :param boq: parsed BoQ with items in source order.
+    :param records: all physical records grouped by type and OZ.
+    :param item_records: effective position and price records in item order.
+    :returns: source references for the stated value and its operands.
+    :raises RuntimeError: if a line finding has no original item index.
+    """
+    if issue.kind == "line":
+        if issue.item_index is None:
+            raise RuntimeError("Line calculation finding has no item index.")
+        item = item_records[issue.item_index - 1]
+        lines = [item.position]
+        if item.price is not None and item.price != item.position:
+            lines.append(item.price)
+        return [_legacy_source(line, issue.oz) for line in lines]
+    kind = "32" if issue.kind == "section" else "99"
+    sources = [_legacy_source(records[(kind, issue.oz)][-1], issue.oz)]
+    for item, source in zip(boq.items, item_records, strict=True):
+        if issue.kind == "total" or item.oz.startswith(issue.oz + "."):
+            sources.append(_legacy_source(source.price or source.position, item.oz))
+    return sources
