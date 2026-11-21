@@ -2,6 +2,7 @@
 
 from html import escape
 
+from . import what_if
 from .history import RULES
 from .model import Item
 
@@ -380,6 +381,86 @@ def _history_comparison(result: dict, report: bool) -> str:
     return "".join(parts)
 
 
+def _number(value: object, row: tuple) -> str:
+    """Render one number of a what-if row.
+
+    :param value: the number, or None.
+    :param row: quantity, unit price and amount of the row.
+    :returns: the number, or which inputs are missing.
+    """
+    if value is not None:
+        return escape(str(value))
+    missing = [
+        label
+        for label, number in zip(what_if.FIELDS.values(), row[:2], strict=True)
+        if number is None
+    ]
+    return "nicht berechenbar: " + escape(", ".join(missing) or "–") + " fehlt"
+
+
+def what_if_section(
+    base: str, positions: tuple[Item, ...], assumption: dict | None, *, form: bool
+) -> str:
+    """Render one labelled hypothetical calculation and, on the review, its form.
+
+    :param base: internally generated run URL.
+    :param positions: parsed positions; they are not changed.
+    :param assumption: the current assumption, if any.
+    :param form: whether to add the input form.
+    :returns: an HTML section.
+    """
+    parts = ["<section>"]
+    if assumption:
+        parts.append("<h2>Hypothetische Annahme – keine Quelldaten, kein Marktpreis</h2>")
+        number = assumption["position"]
+        item = positions[number - 1]
+        label = what_if.FIELDS[assumption["field"]]
+        parts.append(
+            f"<p>Position {number} · {escape(item.oz) or '–'} · {escape(item.short_text)} · "
+            f"{escape(item.unit) or '–'} · geändert: {label} = {escape(assumption['value'])}</p>"
+        )
+        result = what_if.evaluate(item, assumption)
+        if "refused" in result:
+            parts.append(f"<p>Keine hypothetische Rechnung: {escape(result['refused'])}</p>")
+        else:
+            original, changed = result["original"], result["hypothetical"]
+            rows = "".join(
+                f"<tr><th>{title}</th><td>{_number(original[i], original)}</td>"
+                f"<td>{_number(changed[i], changed)}</td></tr>"
+                for i, title in enumerate(("Menge", "EP", "Betrag (berechnet)"))
+            )
+            delta = result["delta"]
+            stated = "–" if item.total is None else escape(str(item.total))
+            parts.append(
+                "<p>Rechnung: Menge × EP, kaufmännisch auf Cent gerundet.</p>"
+                "<table><tr><th></th><th>Original</th><th>Hypothetisch</th></tr>"
+                f"{rows}</table><p>Rechendifferenz (hypothetisch): "
+                f"{'nicht berechenbar' if delta is None else delta}</p>"
+                f"<p>Angegebener Gesamtbetrag unverändert: {stated}</p>"
+            )
+    if form:
+        current = assumption or {}
+        options = "".join(
+            f'<option value="{n}"{" selected" * (current.get("position") == n)}>'
+            f"{n} · {escape(item.oz) or '–'}</option>"
+            for n, item in enumerate(positions, 1)
+        )
+        fields = "".join(
+            f'<option value="{key}"{" selected" * (current.get("field") == key)}>{title}</option>'
+            for key, title in what_if.FIELDS.items()
+        )
+        parts.append(
+            "<h2>Was-wäre-wenn-Rechnung</h2>"
+            f'<form method="post" action="{escape(base)}/whatif">'
+            f'<label>Position <select name="position">{options}</select></label>'
+            f'<label>Feld <select name="field">{fields}</select></label>'
+            "<label>Hypothetischer Wert (leer entfernt die Annahme) "
+            f'<input name="value" inputmode="decimal" value="{escape(current.get("value", ""))}">'
+            "</label><button>Annahme berechnen</button></form>"
+        )
+    return "".join(parts) + "</section>"
+
+
 def review_view(
     base: str, name: str, result: dict, *, report: bool = False, download: bool = False
 ) -> str:
@@ -532,6 +613,10 @@ def review_view(
                 _HISTORY_FIELDS.replace("<!--current-trade-->", escape(result["history_trade"]))
             )
         content.append('<div class="actions"><button>Änderungen speichern</button></div></form>')
+    if "positions" in result and (not report or result.get("what_if")):
+        content.append(
+            what_if_section(base, result["positions"], result.get("what_if"), form=not report)
+        )
     if report:
         questions = [
             f"<li><strong>{f['id']}</strong> "

@@ -112,3 +112,7 @@ verification.
   partial results for unavailable, invalid or incomplete model output, and an opt-in real-model
   tier. Verified that a changed anchor and a valid fake response fail.
 - [ ] Add the separate legal retrieval demo after the core workflow.
+  Blocked: no authorized legal corpus.
+- [x] Add one explicit, labelled what-if calculation (quantity or unit price) per GAEB or
+  XLSX review without changing source data. Verified with the real D84 sample, invalid
+  inputs, refusals and rounding; 13 of 13 controlled mutants fail the tests.
