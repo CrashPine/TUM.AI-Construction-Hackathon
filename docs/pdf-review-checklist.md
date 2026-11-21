@@ -56,3 +56,8 @@ timeout succeeded. The explanation was in English. The roof case still returned
 zero candidates, and the complete exterior waterproofing control returned none.
 This checks classification given selected evidence. End-to-end retrieval of a
 new real case remains open.
+Full shaft upload with local Ollama: the first general comparison timed out
+on unrelated pages. Prioritizing one rule-backed pair sent file pages 2 and 5
+together. With a one-request budget and a 150-second timeout, the model returned
+needs_scope_check on the same evidence. HTML, annotated PDF and Markdown
+exports succeeded. This verifies rule-guided model review, with partial coverage.
