@@ -135,7 +135,7 @@ def _entries(
             lump_sum=item.findtext("LumpSumItem") == "Yes",
             unit_price=parsed["UP"],
             price_basis=parsed["PriceBasis"],
-            line_total=parsed["IT"],
+            total=parsed["IT"],
             invalid_numbers=tuple(invalid),
             adjusted_total=any(
                 item.find(tag) is not None for tag in ("DiscountPcnt", "RedPriceComp")

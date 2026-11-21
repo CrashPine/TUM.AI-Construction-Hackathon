@@ -10,10 +10,12 @@ class Section:
 
     :ivar oz: the full Ordnungszahl, levels joined by ".", for example "01.02".
     :ivar title: the section label.
+    :ivar total: the section total the file states, or None if it states none.
     """
 
     oz: str
     title: str
+    total: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -29,9 +31,9 @@ class Item:
     :ivar unit: the unit (ME) as the file writes it, for example "m3", "m³" or "Stk.".
     :ivar provisional: True for a Bedarfsposition (provisional item).
     :ivar lump_sum: True for a lump-sum item (Pauschalposition).
-    :ivar unit_price: explicitly supplied unit price.
+    :ivar unit_price: the unit price (Einheitspreis, EP), or None if the file gives none.
+    :ivar total: the line total (Gesamtbetrag, GB), or None if the file gives none.
     :ivar price_basis: explicitly supplied number of units covered by the unit price.
-    :ivar line_total: explicitly supplied line total.
     :ivar invalid_numbers: XML field names and raw invalid numeric values.
     :ivar adjusted_total: whether an explicit price adjustment prevents a simple check.
     """
@@ -44,10 +46,18 @@ class Item:
     provisional: bool = False
     lump_sum: bool = False
     unit_price: Decimal | None = None
+    total: Decimal | None = None
     price_basis: Decimal | None = None
-    line_total: Decimal | None = None
     invalid_numbers: tuple[tuple[str, str], ...] = ()
     adjusted_total: bool = False
+
+    @property
+    def line_total(self) -> Decimal | None:
+        """Read the stated line total for XML review.
+
+        :returns: the supplied Gesamtbetrag, including an explicit zero.
+        """
+        return self.total
 
 
 @dataclass(frozen=True)
@@ -58,6 +68,7 @@ class BoQ:
     :ivar phase: the GAEB exchange phase, for example "83" (bid request), or None if unknown.
     :ivar sections: the sections in document order.
     :ivar items: the items in document order.
+    :ivar total: the net total of the BoQ the file states, or None if it states none.
     :ivar version: GAEB XML version from the header or a recognized namespace.
     :ivar namespace: XML namespace declared on the root.
     :ivar version_date: schema edition from GAEBInfo/VersDate.
@@ -68,6 +79,7 @@ class BoQ:
     phase: str | None
     sections: tuple[Section, ...]
     items: tuple[Item, ...]
+    total: Decimal | None = None
     version: str | None = None
     namespace: str | None = None
     version_date: str | None = None

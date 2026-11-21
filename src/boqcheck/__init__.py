@@ -5,10 +5,16 @@
 
 from pathlib import PurePath
 
+from boqcheck.gaeb90 import parse_gaeb90
 from boqcheck.gaeb_xml import parse_gaeb_xml
 from boqcheck.model import BoQ
 
-_PARSERS = {".x83": parse_gaeb_xml}
+_PARSERS = {
+    ".x83": parse_gaeb_xml,
+    ".d83": parse_gaeb90,
+    ".d84": parse_gaeb90,
+    ".d86": parse_gaeb90,
+}
 
 
 def parse(filename: str, data: bytes) -> BoQ:

@@ -46,11 +46,13 @@ path = Path("data/raw/GAEB-[PROJEKT_004].X83")
 boq = parse(path.name, path.read_bytes())  # sections and items in document order
 ```
 
-`parse()` selects the parser by the file suffix, in any letter case. It reads `.x83` (GAEB DA XML).
-It raises `ValueError` for other suffixes, for data that is not well-formed XML and for XML without
+`parse()` selects the parser by the file suffix, in any letter case. It reads `.x83` (GAEB DA XML)
+and `.d83`, `.d84`, `.d86` (GAEB 90). It raises `ValueError` for other suffixes, for data that is not well-formed XML and for XML without
 a GAEB `Award/BoQ` element. It also raises `ValueError` if a `BoQBkdn` element has no `Length`,
 or if no `BoQBkdn` element has the type `Item`. Other faults can raise other exceptions, for
-example a `Qty` that is not a number. All parsers return the model in `src/boqcheck/model.py`
+example a `Qty` that is not a number. The GAEB 90 parser raises `ValueError` for data without a
+`00` record or OZ mask, for a `23` record that does not follow the `21` record of its OZ, and for
+files without `21` records (`StBALV23040.D84`). All parsers return the model in `src/boqcheck/model.py`
 (`BoQ`, `Section`, `Item`) with these rules:
 
 - An OZ joins its levels with `.` and pads them with zeros to the widths of the BoQ breakdown, for
@@ -60,12 +62,23 @@ example a `Qty` that is not a number. All parsers return the model in `src/boqch
 - The long text of an item ends with its sub-descriptions (Unterbeschreibungen). Each one starts
   with the line `Unterbeschreibung <n>:`, followed by its short text and its long text.
 - Units stay as the file writes them (`m3`, `m³`, `Stk.`).
+- Prices are `Decimal` or `None`: `Item.unit_price`, `Item.total`, `Section.total` and `BoQ.total`
+  (net grand total). Only GAEB 90 files fill them; a blank or zero grand total gives `None`.
+
+`check_calculations(boq)` in `src/boqcheck/calculation.py` checks the prices: each item total is
+quantity × unit price rounded half up to cents, and each section total and the grand total is the
+sum of its item totals. It returns `CalculationFinding`s with status `mismatch` or `inconclusive`
+and a German explanation; a mismatch lists the OZs missing from the item sequence. A result is
+inconclusive, not a mismatch, if an operand or an item total is missing, if a sum covers a
+Bedarfsposition (provisional item), if a Bedarfsposition states a zero total, or if a section
+states a total of 0 while its items sum to more. No sample has a
+priced Bedarfsposition, so its pricing rules are not known.
 
 ## Repository map
 
 | Path | Content |
 |---|---|
-| `src/boqcheck/` | the package: data model (`model.py`), GAEB DA XML parser (`gaeb_xml.py`), `parse()` in `__init__.py` |
+| `src/boqcheck/` | the package: data model (`model.py`), GAEB DA XML parser (`gaeb_xml.py`), GAEB 90 parser (`gaeb90.py`), calculation check (`calculation.py`), `parse()` in `__init__.py` |
 | `tests/` | pytest tests; they read the sample files in `data/raw/` |
 | `pyproject.toml`, `uv.lock`, `.python-version` | project, dev tools and their settings; locked versions |
 | `data/raw/` | the organizers' 44 sample files, unchanged; read-only |
@@ -128,12 +141,17 @@ the GAEB specification. All texts are German; PDFs use a decimal comma (`1.234,5
   columns 75-80 a line number.
 - The code page differs per file: four files use DOS code page 850, `Angebot AN24-0305.D84` uses
   ISO-8859-1. Detect it per file (the right one gives German umlauts). Never assume UTF-8.
-- The header record `00` holds the phase in columns 11-12 (83, 84 or 86).
+- The header record `00` is not always the first line. It holds the phase in columns 11-12
+  (83, 84 or 86) and the OZ mask in columns 63-71 (digits 1-4 for the levels, `P` for the item
+  number, `I` for the index).
 - Record types, inferred from the content: `11`/`12` section start and label, `21` item (OZ,
   quantity, unit), `23` prices, `25` short text, `26` long text, `T0`/`T1`/`T9` free text,
-  `99` end of file. Other types occur too.
-- Numbers have implied decimal places, and the layout of `23` records differs between files.
-  Check quantity × unit price = total on some items before you trust a scale.
+  `32` section total, `99` end of file with the net grand total. Other types occur too.
+- Field columns used by `gaeb90.py` (1-based): OZ 3-11 in all records; `21` quantity 24-34
+  (3 decimals) and unit 35-38; column 43 holds an `X` in 28 D83 items, meaning unknown, not read.
+  `23` unit price 13-23 (2 decimals if column 23 is blank, else 3) and total 25-36 (2 decimals);
+  `32` total 13-24; `99` net total 3-14. Quantity × unit price = total holds on all priced items.
+- Files without `11`/`12` records (`Angebot AN24-0305.D84`) get their sections from `32` records.
 - `StBALV23040.D84` has only price records. Join it to `StBALV23040.D86` by OZ to get the texts.
 
 **PDF** (34 files)
