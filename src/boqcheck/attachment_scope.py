@@ -70,6 +70,31 @@ def pdf_properties(pages: list[list[Line]]) -> list[dict]:
     return values
 
 
+def pdf_positions(pages: list[list[Line]]) -> list[dict]:
+    """Collect the lines of positions having an explicit component heading.
+
+    :param pages: extracted lines in reading order.
+    :returns: OZ, component and lines with stable IDs and 1-based pages.
+    """
+    positions, number = [], 0
+    for oz, lines in groupby(chain.from_iterable(pages), key=lambda line: line.oz):
+        rows = list(lines)
+        heading = _HEADING.fullmatch(rows[0].text)
+        if heading and heading[1] == oz:
+            positions.append(
+                {
+                    "oz": oz,
+                    "component": heading[2],
+                    "lines": [
+                        {"id": f"L{number + i}", "page": line.page + 1, "text": line.text}
+                        for i, line in enumerate(rows)
+                    ],
+                }
+            )
+        number += len(rows)
+    return positions
+
+
 def compare_attachment(result: dict, attachment: dict) -> dict:
     """Compare unique same-position, same-component fields and retain both citations.
 

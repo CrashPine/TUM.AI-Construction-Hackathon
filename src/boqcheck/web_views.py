@@ -436,6 +436,9 @@ def review_view(
                 "verschachtelte Tabellen oder eingebettete Inhalte); kein vollständiger Abgleich."
                 "</p>"
             )
+    if review := result.get("attachment_review"):
+        content.append(f"<p>{escape(review['summary'])}</p>")
+        content.extend(f"<p>{escape(warning)}</p>" for warning in review["warnings"])
     entries = {entry["id"]: entry for entry in attachment["entries"]} if attachment else {}
     if attachment and not report:
         content.append(

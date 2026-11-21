@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 
 import pymupdf
 
-from .attachment_scope import pdf_properties
+from .attachment_scope import pdf_positions, pdf_properties
 from .contradictions import Finding, find_contradictions, rule_scope
 from .history import review_model_patterns
 from .pdf_annotate import annotate
@@ -374,6 +374,7 @@ def review_pdf(
         "text_pages": len(pages) - len(skipped),
         "rule_scope": rule_scope(pages),
         "attachment_properties": pdf_properties(pages),
+        "attachment_positions": pdf_positions(pages),
         "findings": records,
         "model_history": model_history,
         **({"checkpoint": state} if templates else {}),
