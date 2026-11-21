@@ -84,6 +84,9 @@ verification.
 - [x] Optionally filter metadata-compatible positions by local Ollama embeddings. Verified with synthetic vectors and an unavailable service.
 - [x] Import historical XLSX rows through an explicit local manifest, with workbook, sheet and row evidence.
 - [x] Shortlist projects by supplied summaries using local embeddings before matching positions.
+- [x] Report retrieval provenance per comparison: model, threshold, counts, metadata-gated
+  peers, unprofiled projects and the failure reason. Verified with synthetic vectors and mocked
+  HTTP errors only; model quality is not established by these tests.
 - [x] Smoke-test both retrieval stages with real GAEB text and local nomic-embed-text:v1.5.
   Project summaries built from up to 1,000 characters of section titles scored 0.969 for two
   editions of the same LV and 0.708/0.712 for two other files. For six X83 queries against the
