@@ -25,8 +25,9 @@ from .history_jobs import (
 from .review_pdf import review_pdf
 from .semantic import SemanticConfig
 from .spelling import load_lexicon
-from .web_gaeb import review_legacy, review_x83
+from .web_gaeb import review_legacy, review_positions, review_x83
 from .web_views import STATUSES, review_view, upload_view
+from .xlsx_lv import read_xlsx
 
 _RUN = re.compile(r"/review/([a-f0-9]{32})(?:/(pdf|log|report|resume|attachment))?")
 _MAX_UPLOAD = 32 * 1024 * 1024
@@ -139,7 +140,10 @@ def _analyse(
         return review_legacy(
             name, _read_body(env, _MAX_UPLOAD, media_type="application/octet-stream")
         ), None
-    raise ValueError("Unterstützt werden PDF und GAEB X83, D83, D84 und D86.")
+    if suffix == ".xlsx":
+        data = _read_body(env, _MAX_UPLOAD, media_type="application/octet-stream")
+        return review_positions(*read_xlsx(name, data)), None
+    raise ValueError("Unterstützt werden PDF, GAEB und XLSX.")
 
 
 def _attach(env: dict, filename: str, result: dict) -> dict:
