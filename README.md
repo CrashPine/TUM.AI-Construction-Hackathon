@@ -41,7 +41,9 @@ uses JSON output with thinking disabled. Existing OpenAI-compatible loopback cha
 supported.
 
 The comparison budget defaults to 24 requests and can be adjusted with `--max-requests`.
-The log reports incomplete coverage and preserves deterministic findings when the model is unavailable.
+If the budget cannot cover every text window, the tool samples windows across the document.
+The log reports completed comparisons and which physical PDF pages supplied all, some, or none
+of their extracted lines. It preserves deterministic findings when the model is unavailable.
 
 ## Challenge
 

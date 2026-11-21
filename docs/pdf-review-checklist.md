@@ -11,5 +11,6 @@
 - [x] Review the shaft LV excerpt from file pages 2 and 5 (printed 53 and 56). Ollama completed all three comparisons. The exported candidate retained the built-in rule's 8 mm versus 15 mm finding, with reciprocal comments on both pages.
 - [x] Run a live negative control where opposite states apply to two different switches. Ollama completed the comparison and the review returned zero findings.
 - [ ] Verify on a broader set of real PDFs whether the model identifies contradictions beyond the built-in rules. Report missed expected findings and false positives.
-- [ ] Improve review of long PDFs under a request budget. The current log reports any comparisons skipped.
+- [x] Spread a small model budget across the document and log coverage by physical PDF page. Verified on the 91-page `Abgabe LV.pdf`: three requests covered excerpts near the start, middle and end of the file.
+- [ ] Prioritize likely cross-page conflicts under a limited budget. The current sampling spreads local checks across the full document but can miss pairs of related clauses.
 - [ ] Add OCR for scanned PDFs if scanned documents are in scope. The current tool reports textless pages as skipped.

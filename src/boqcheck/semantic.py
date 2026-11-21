@@ -2,9 +2,11 @@
 
 import ipaddress
 import json
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
 from email.message import Message
+from itertools import groupby
 from typing import BinaryIO
 from urllib.error import URLError
 from urllib.parse import urlsplit
@@ -86,15 +88,55 @@ def _windows(sources: dict[str, Line]) -> list[list[str]]:
     return windows
 
 
-def _comparisons(windows: list[list[str]]) -> Iterator[tuple[list[str], list[str]]]:
-    """Schedule each window locally first, then compare nearby and distant windows.
+def _comparisons(windows: list[list[str]], budget: int) -> Iterator[tuple[list[str], list[str]]]:
+    """Spread local checks across the document if the budget cannot cover every window.
 
     :param windows: consecutive document windows.
+    :param budget: maximum number of requests available.
     :yields: window pairs, with an empty second window for local comparisons.
     """
+    if budget <= 0:
+        return
+    if budget < len(windows):
+        if budget == 1:
+            yield windows[len(windows) // 2], []
+            return
+        for index in range(budget):
+            yield windows[index * (len(windows) - 1) // (budget - 1)], []
+        return
+
     for distance in range(len(windows)):
         for index in range(len(windows) - distance):
             yield windows[index], windows[index + distance] if distance else []
+
+
+def _page_coverage(pages: list[list[Line]], sources: dict[str, Line], checked: set[str]) -> str:
+    """Summarize which physical pages contributed text to completed comparisons.
+
+    :param pages: source lines by page, including empty pages.
+    :param sources: immutable source lines indexed by ID.
+    :param checked: unique source IDs included in valid model responses.
+    :returns: grouped one-based page ranges with line coverage status.
+    """
+    counts = Counter(sources[key].page for key in checked)
+    statuses = []
+    for index, lines in enumerate(pages):
+        count = counts[index]
+        if not lines:
+            statuses.append("ohne extrahierbaren Text")
+        elif count == 0:
+            statuses.append("nicht abgedeckt")
+        elif count < len(lines):
+            statuses.append("teilweise abgedeckt")
+        else:
+            statuses.append("alle Textzeilen übermittelt")
+
+    ranges = []
+    for status, group in groupby(enumerate(statuses, 1), key=lambda entry: entry[1]):
+        numbers = [number for number, _ in group]
+        label = str(numbers[0]) if len(numbers) == 1 else f"{numbers[0]}–{numbers[-1]}"
+        ranges.append(f"{label} ({status})")
+    return ", ".join(ranges)
 
 
 def _request(config: SemanticConfig, payload: dict) -> list:
@@ -164,9 +206,10 @@ def semantic_review(
     findings = []
     warnings = []
     seen: set[frozenset[str]] = set()
+    checked: set[str] = set()
     completed = rejected = 0
 
-    for index, (left, right) in enumerate(_comparisons(windows)):
+    for index, (left, right) in enumerate(_comparisons(windows, config.max_requests)):
         if index >= config.max_requests:
             break
         payload = {
@@ -187,6 +230,8 @@ def semantic_review(
             warnings.append(f"Semantische Prüfung ab Vergleich {index + 1} nicht verfügbar.")
             break
         completed += 1
+        checked.update(left)
+        checked.update(right)
         left_ids, right_ids = set(left), set(right or left)
         for record in records:
             if not isinstance(record, dict):
@@ -228,4 +273,5 @@ def semantic_review(
         warnings.append(f"Modellvorschläge ohne gültigen Quellenbeleg verworfen: {rejected}.")
     if completed < total:
         warnings.append(f"Semantische Abdeckung unvollständig: {completed}/{total} Vergleiche.")
-    return findings, warnings, f"{completed}/{total} Vergleiche mit Modell"
+    coverage = _page_coverage(pages, sources, checked)
+    return findings, warnings, f"{completed}/{total} Vergleiche mit Modell. PDF-Seiten: {coverage}"

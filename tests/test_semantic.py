@@ -6,6 +6,7 @@ import pymupdf
 import pytest
 
 from boqcheck import semantic
+from boqcheck.pdf_extract import extract
 from boqcheck.review_pdf import review_pdf
 
 _CONFIG = semantic.SemanticConfig("http://127.0.0.1:18081/v1/chat/completions", "test")
@@ -86,3 +87,43 @@ def test_semantic_failure_keeps_export(tmp_path: Path) -> None:
     assert result["semantic_coverage"].startswith("0/1")
     assert Path(result["annotated_pdf"]).is_file()
     assert Path(result["findings_log"]).is_file()
+
+
+def test_limited_budget_spans_the_document(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Check the first and last windows and report exact page coverage.
+
+    :param monkeypatch: fixture for replacing window boundaries and the inference call.
+    """
+    with pymupdf.open() as document:
+        for number in range(5):
+            page = document.new_page()
+            if number != 2:
+                page.insert_text((72, 72), f"First requirement on page {number + 1}")
+                page.insert_text((72, 96), f"Second requirement on page {number + 1}")
+        pages, _ = extract(document)
+
+    windows = [["L1", "L2", "L3"], ["L4", "L5", "L6"], ["L7", "L8"]]
+    monkeypatch.setattr(semantic, "_windows", lambda _: windows)
+    calls = []
+
+    def model_response(config: semantic.SemanticConfig, payload: dict) -> list:
+        """Record the model requests and return no candidates.
+
+        :param config: requested model configuration.
+        :param payload: input lines sent for analysis.
+        :returns: empty model findings.
+        """
+        assert config.model == "test"
+        calls.append([line["id"] for line in payload["left"]])
+        return []
+
+    monkeypatch.setattr(semantic, "_request", model_response)
+    config = semantic.SemanticConfig(_CONFIG.endpoint, "test", max_requests=2)
+    findings, warnings, coverage = semantic.semantic_review(pages, config)
+    assert calls == [windows[0], windows[-1]]
+    assert not findings
+    assert warnings
+    assert coverage.startswith("2/6")
+    assert "1 (alle Textzeilen übermittelt), 2 (teilweise abgedeckt)" in coverage
+    assert "3 (ohne extrahierbaren Text), 4 (nicht abgedeckt)" in coverage
+    assert "5 (alle Textzeilen übermittelt)" in coverage
