@@ -10,11 +10,13 @@ from sqlite3 import connect
 from urllib.error import URLError
 from urllib.parse import urlencode
 from wsgiref.util import setup_testing_defaults
+from zipfile import ZipFile
 
 import pymupdf
 import pytest
 
 from boqcheck import semantic
+from boqcheck.docx_context import read_context
 from boqcheck.history import initialize, promote, replay
 from boqcheck.web import make_app
 from boqcheck.web_gaeb import review_legacy
@@ -365,6 +367,61 @@ def test_legacy_price_evidence(tmp_path: Path) -> None:
     assert _request(app, "/upload?name=test.D83", data, "application/octet-stream")[0].startswith(
         "400"
     )
+
+
+def test_docx_attachment(tmp_path: Path) -> None:
+    """Attach a real DOCX, cite a source and keep independent runs isolated.
+
+    :param tmp_path: temporary review storage.
+    """
+    app = make_app(tmp_path)
+    pdf = _ROOF.read_bytes()
+    upload = "/upload?name=roof.pdf"
+    run = _request(app, upload, pdf, "application/pdf")[1]["Location"]
+    other = _request(app, upload, pdf, "application/pdf")[1]["Location"]
+    data = _ROOF.with_name("LV-Positionen.docx").read_bytes()
+    target = run + "/attachment?name=LV-Positionen.docx"
+    assert _request(app, target, b"invalid", "application/octet-stream")[0].startswith("400")
+    for _ in range(2):
+        assert _request(app, target, data, "application/octet-stream")[0].startswith("303")
+    page = _request(app, run)[2].decode()
+    assert "53 Textstellen" in page and "P2 · Absatz 2" in page
+    assert "docx-P2" not in _request(app, other)[2].decode()
+    fields = {
+        "status-BG-001": "confirmed",
+        "question-BG-001": "Welche Leistung gilt?",
+        "citation-BG-001": "P2",
+    }
+    assert _request(app, run, urlencode(fields).encode(), "application/x-www-form-urlencoded")[
+        0
+    ].startswith("303")
+    report = _request(app, run + "/report?download=1")[2].decode()
+    assert "LV-Positionen.docx · Absatz 2" in report and "Baustelleneinrichtung [psch]" in report
+    assert "Welche Leistung gilt?" in report
+
+
+def test_docx_cell_and_heading_order() -> None:
+    """Keep a styled heading, two table cells and the next paragraph in source order."""
+    data = BytesIO()
+    with ZipFile(data, "w") as archive:
+        archive.writestr(
+            "word/document.xml",
+            """
+          <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+          <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Dach</w:t></w:r></w:p>
+          <w:tbl><w:tr><w:tc><w:p><w:r><w:t>Beton</w:t></w:r></w:p></w:tc>
+          <w:tc><w:p><w:r><w:t>8 mm</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+          <w:p><w:r><w:t>Ende</w:t></w:r></w:p></w:body></w:document>""",
+        )
+    entries = read_context(data.getvalue())
+    assert [(e["id"], e["text"]) for e in entries] == [
+        ("P1", "Dach"),
+        ("T1R1C1", "Beton"),
+        ("T1R1C2", "8 mm"),
+        ("P2", "Ende"),
+    ]
+    assert entries[0]["reference"] == "Überschrift 1"
+    assert entries[2]["reference"] == "Tabelle 1, Zeile 1, Zelle 2"
 
 
 def test_invalid_upload_returns_error(tmp_path: Path) -> None:

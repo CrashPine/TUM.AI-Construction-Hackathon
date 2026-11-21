@@ -60,7 +60,9 @@ _UPLOAD = """
 <form id="upload">
   <label for="lv">Leistungsverzeichnis als PDF oder GAEB X83, D83, D84, D86</label>
   <input id="lv" type="file" accept=".pdf,.x83,.d83,.d84,.d86,application/pdf" required>
-  <p class="badge">DOCX und XLSX werden derzeit nicht unterstützt.</p>
+  <label for="attachment">Anlage zum LV (DOCX, optional)</label>
+  <input id="attachment" type="file" accept=".docx">
+  <p class="badge">XLSX wird derzeit nicht unterstützt.</p>
   <!--model-option-->
   <!--history-option-->
   <div class="actions"><button>Datei prüfen</button></div>
@@ -92,6 +94,22 @@ form.addEventListener('submit', async (event) => {
       method: 'POST', headers: {'Content-Type': type}, body: file
     });
     if (!response.ok) throw new Error(await response.text());
+    const attachment = document.querySelector('#attachment').files[0];
+    if (attachment) {
+      const params = new URLSearchParams({name: attachment.name});
+      const added = await fetch(response.url + '/attachment?' + params, {
+        method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: attachment
+      });
+      if (!added.ok) {
+        status.textContent = 'Anlage: ' + await added.text() + ' ';
+        const link = document.createElement('a');
+        link.href = response.url;
+        link.textContent = 'LV-Prüfung öffnen';
+        status.append(link);
+        button.disabled = false;
+        return;
+      }
+    }
     location.assign(response.url);
   } catch (error) {
     status.textContent = 'Prüfung fehlgeschlagen. ' + error.message;
@@ -347,7 +365,40 @@ def review_view(
         content.append("<p>Keine aktiven Befunde.</p>")
     if findings and not report:
         content.append(f'<form method="post" action="{base}">')
-    content.extend(_finding(base, finding, report, history) for finding in findings)
+    attachment = result.get("attachment")
+    entries = {entry["id"]: entry for entry in attachment["entries"]} if attachment else {}
+    if attachment and not report:
+        content.append(
+            f"<details><summary>Anlage: {escape(attachment['name'])} "
+            f"({len(entries)} Textstellen)</summary>"
+        )
+        for key, entry in entries.items():
+            content.append(
+                f'<p id="docx-{key}"><b>{key} · {escape(entry["reference"])}</b> '
+                f"{escape(entry['text'])}</p>"
+            )
+        content.append("</details><datalist id='docx-sources'>")
+        content.extend(
+            f'<option value="{key}">{escape(entry["text"][:80])}</option>'
+            for key, entry in entries.items()
+        )
+        content.append("</datalist>")
+    for finding in findings:
+        content.append(_finding(base, finding, report, history))
+        citation = finding.get("citation", "")
+        if citation in entries:
+            entry = entries[citation]
+            content.append(
+                f"<p><b>DOCX-Beleg zu {finding['id']} · {escape(attachment['name'])} · "
+                f"{escape(entry['reference'])}</b></p><blockquote>"
+                f"{escape(entry['text'])}</blockquote>"
+            )
+        if entries and not report:
+            content.append(
+                f"<label>DOCX-Beleg zu {finding['id']} (optional)"
+                f'<input name="citation-{finding["id"]}" list="docx-sources" '
+                f'value="{escape(citation)}"></label>'
+            )
     if findings and not report:
         if history and any(f.get("rule") in RULES | {"semantic"} for f in findings):
             content.append(

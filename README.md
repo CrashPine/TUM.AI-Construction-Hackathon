@@ -36,7 +36,9 @@ Uncheckable sums are reported separately, and unpriced positions in priced files
 The experimental price check assumes one quantity unit per unit price: position types and price
 bases are not fully recognized, so discrepancies require review. A numbering gap is only a hint,
 not proof of missing work. A price-only D84 displays prices and reports missing quantities.
-DOCX and XLSX imports remain open.
+An optional DOCX attachment belongs to the uploaded LV. Open its source list,
+select a paragraph or table cell for a finding, and save the review to include that excerpt
+in the HTML report. Selection is manual. XLSX import remains open.
 
 To make local Ollama available for PDF uploads, start the server with:
 

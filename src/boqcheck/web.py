@@ -11,6 +11,7 @@ from urllib.parse import parse_qs
 from uuid import uuid4
 from wsgiref.simple_server import make_server
 
+from .docx_context import read_context
 from .history import RULES, SEVERITIES, initialize, model_patterns, promote, replay
 from .history_jobs import (
     initialize_jobs,
@@ -26,7 +27,7 @@ from .spelling import load_lexicon
 from .web_gaeb import review_legacy, review_x83
 from .web_views import STATUSES, review_view, upload_view
 
-_RUN = re.compile(r"/review/([a-f0-9]{32})(?:/(pdf|log|report|resume))?")
+_RUN = re.compile(r"/review/([a-f0-9]{32})(?:/(pdf|log|report|resume|attachment))?")
 _MAX_UPLOAD = 32 * 1024 * 1024
 
 
@@ -59,6 +60,7 @@ def _update(
     :raises ValueError: if a status or question is invalid.
     """
     changes = []
+    evidence = {entry["id"]: entry for entry in result.get("attachment", {}).get("entries", [])}
     cases = []
     for finding in result["findings"]:
         identifier = finding["id"]
@@ -69,7 +71,10 @@ def _update(
         correction = fields.get(f"correction-{identifier}", [finding.get("correction", "")])[0]
         if "correction" in finding and (not correction.strip() or len(correction) > 120):
             raise ValueError("Eine Korrektur mit höchstens 120 Zeichen ist erforderlich.")
-        changes.append((finding, status, question, correction))
+        citation = fields.get(f"citation-{identifier}", [finding.get("citation", "")])[0].strip()
+        if citation and citation not in evidence:
+            raise ValueError("Unbekannter DOCX-Quellenverweis.")
+        changes.append((finding, status, question, correction, citation))
         if f"promote-{identifier}" in fields:
             rule = finding.get("rule")
             if history_db is None or status != "confirmed" or rule not in RULES | {"semantic"}:
@@ -97,8 +102,9 @@ def _update(
         if not reviewer or len(reviewer) > 120 or len(trade) > 120 or severity is None:
             raise ValueError("Bitte Prüfer und gültige Priorität für die Historie angeben.")
         promote(history_db, source, result["document_hash"], reviewer, trade, severity, cases)
-    for finding, status, question, correction in changes:
+    for finding, status, question, correction, citation in changes:
         finding.update(review_status=status, question=question)
+        finding["citation"] = citation
         if "correction" in finding:
             finding["correction"] = correction.strip()
 
@@ -131,6 +137,29 @@ def _analyse(
             name, _read_body(env, _MAX_UPLOAD, media_type="application/octet-stream")
         ), None
     raise ValueError("Unterstützt werden PDF und GAEB X83, D83, D84 und D86.")
+
+
+def _attach(env: dict, filename: str, result: dict) -> dict:
+    """Associate one validated DOCX with the selected review.
+
+    :param env: request carrying the attachment.
+    :param filename: name supplied for source references.
+    :param result: existing review and any prior attachment.
+    :returns: updated review or the original for an identical retry.
+    :raises ValueError: if the attachment is invalid or conflicts with an earlier upload.
+    """
+    if not filename.lower().endswith(".docx"):
+        raise ValueError("Bitte eine DOCX-Anlage wählen.")
+    data = _read_body(env, _MAX_UPLOAD, media_type="application/octet-stream")
+    digest = sha256(data).hexdigest()
+    if prior := result.get("attachment"):
+        if prior["digest"] != digest:
+            raise ValueError("Diese Prüfung enthält bereits eine DOCX-Anlage.")
+        return result
+    return {
+        **result,
+        "attachment": {"name": filename, "digest": digest, "entries": read_context(data)},
+    }
 
 
 def _apply_history(path: Path, result: dict, trade: str) -> None:
@@ -195,10 +224,13 @@ def _resume(
     )
     _apply_history(path, result, previous["history_trade"])
     saved = {finding["id"]: finding for finding in previous["findings"]}
+    if "attachment" in previous:
+        result["attachment"] = previous["attachment"]
     for finding in result["findings"]:
         old = saved.get(finding["id"])
         if old and old["sources"] == finding["sources"]:
             finding.update(question=old["question"], review_status=old["review_status"])
+            finding["citation"] = old.get("citation", "")
             if "correction" in old and "correction" in finding:
                 finding["correction"] = old["correction"]
         else:
@@ -268,7 +300,17 @@ def make_app(
                 name, result = run
                 subpage = match[2]
                 base = f"/review/{match[1]}"
-                if method == "POST" and subpage == "resume":
+                if method == "POST" and subpage == "attachment":
+                    filename = query.get("name", [""])[0][:200]
+                    updated = _attach(env, filename, result)
+                    if updated is not result:
+                        result = updated
+                        if history_db is not None and result.get("persistent_batch"):
+                            save_review(history_db, identifier, result)
+                        runs[identifier] = (name, result)
+                    status = "303 See Other"
+                    headers.append(("Location", base))
+                elif method == "POST" and subpage == "resume":
                     updated = _resume(
                         history_db, identifier, name, result, semantic, directory / uuid4().hex
                     )
@@ -304,7 +346,7 @@ def make_app(
                         headers.append(
                             ("Content-Disposition", 'attachment; filename="findings.md"')
                         )
-                elif method == "GET" and subpage != "resume":
+                elif method == "GET" and subpage not in ("resume", "attachment"):
                     report = subpage == "report"
                     download = report and query.get("download") == ["1"]
                     body = review_view(base, name, result, report=report, download=download)

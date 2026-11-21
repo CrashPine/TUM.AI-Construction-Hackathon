@@ -63,8 +63,11 @@ verification.
 - [x] Link duplicate OZ occurrences and GAEB 90 price calculations to effective physical records;
   show uncheckable sums and skipped positions. Warn that position types and price bases are not
   fully recognized and that price checks assume one quantity unit per unit price.
-- [ ] Add supporting DOCX and mapped XLSX imports with evidence.
-- [ ] Accept a supporting DOCX in the same LV review after its source anchors are verified.
+- [x] Import DOCX body paragraphs and top-level table cells in order with source anchors.
+  Checked the supplied 53 nonempty paragraphs; styled headings and cells use a synthetic fixture.
+- [x] Attach a DOCX to a specific LV, select a source for a finding and export the excerpt
+  with its filename and paragraph or cell reference. Verify upload isolation and retry.
+- [ ] Add mapped XLSX import with worksheet and row evidence.
 - [x] Label unsupported upload formats in the UI until their adapters pass fixture checks.
 - [ ] Check historical quantity and unit-price anomalies using comparable records and explicit units.
 - [ ] Add the separate legal retrieval demo after the core workflow.
