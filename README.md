@@ -216,3 +216,16 @@ before you build an error rule on it. Only the phase meanings were compared with
 | STLB-Bau | standard text library for BoQ items |
 | GAEB | German standard for BoQ data exchange; formats include GAEB 90 (fixed-width text) and GAEB DA XML |
 | Phase 83, 84, 86 | GAEB exchange phase: bid request, bid, contract award |
+
+## Historical comparison demo
+
+Run `uv run python -m boqcheck.web --historical-dataset history.json` and upload
+the XLSX named in the dataset. The JSON has `filename`, `sha256` (of the exact
+XLSX bytes), `synthetic`, `current` (object keyed by OZ), and `peers` (array).
+Each observation requires `project`, `source`, `trade`, `scope`, and `unit`.
+Pass `scale` and `scale_unit` for quantity comparisons, and `currency`,
+`price_type`, `market`, and `price_period` for price comparisons. Peer rows
+also supply `quantity`, `price` and `price_basis` as applicable. The current
+quantity, price and price basis come from the XLSX. The web report requires
+three distinct comparable projects for a reference range. See
+`test_historical_comparison_export` in `tests/test_web.py` for a synthetic example.

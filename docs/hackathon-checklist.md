@@ -68,5 +68,6 @@ verification.
 - [x] Add mapped XLSX import with worksheet and row evidence. Verified via synthetic workbook upload and HTML export.
 - [x] Label unsupported upload formats in the UI until their adapters pass fixture checks.
 - [x] Calculate historical quantity and price anomalies from explicit comparison metadata and sourced peers. Verified both on synthetic data.
-- [ ] Add historical ingestion, local embedding retrieval and anomaly results to the web report.
+- [x] Load a mapped local historical dataset and export quantity and price findings, peer sources and insufficient-evidence coverage. Verified on synthetic XLSX.
+- [ ] Add automated historical ingestion and local embedding retrieval.
 - [ ] Add the separate legal retrieval demo after the core workflow.

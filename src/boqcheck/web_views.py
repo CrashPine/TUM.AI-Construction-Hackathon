@@ -283,6 +283,51 @@ def _positions(
     )
 
 
+def _history_comparison(result: dict, report: bool) -> str:
+    """Render historical comparison coverage and evidence.
+
+    :param result: structured review with historical comparisons.
+    :param report: whether to omit links to the live position grid.
+    :returns: historical comparison HTML.
+    """
+    if "historical_comparisons" not in result:
+        return ""
+    parts = ["<h2>Historischer Mengen- und Preisvergleich</h2>"]
+    if result["synthetic_history"]:
+        parts.append("<p>Synthetische Beispieldaten. Keine Marktpreise.</p>")
+    if not result["historical_comparisons"]:
+        parts.append("<p>Keine eindeutig zugeordneten Positionen.</p>")
+    statuses = {
+        "anomaly": "Auffällig",
+        "within_reference": "Im Referenzbereich",
+        "unavailable": "Nicht verfügbar",
+        "insufficient_evidence": "Zu wenige Vergleichsprojekte",
+    }
+    for entry in result["historical_comparisons"]:
+        label = f"OZ {escape(entry['oz'])}"
+        if not report:
+            label = f'<a href="#position-{entry["position"]}">{label}</a>'
+        parts.append(f"<h3>{label}</h3>")
+        for key, label in (("quantity", "Menge"), ("unit_price", "Einheitspreis")):
+            comparison = entry["results"][key]
+            parts.append(f"<p><b>{label}:</b> {statuses[comparison['status']]}</p>")
+            if "value" not in comparison:
+                continue
+            basis = escape(" / ".join(comparison["basis"]))
+            parts.append(f"<p>Ist: {comparison['value']:.4g} · Vergleichsbasis: {basis}</p>")
+            if "median" in comparison:
+                parts.append(
+                    f"<p>Median: {comparison['median']:.4g} · "
+                    f"Spanne: {comparison['low']:.4g}–{comparison['high']:.4g}</p>"
+                )
+            for peer in comparison["peers"]:
+                sources = ", ".join(
+                    f"{escape(ref)} ({value:.4g})" for ref, value in peer["sources"]
+                )
+                parts.append(f"<p>{escape(peer['project'])} · {sources}</p>")
+    return "".join(parts)
+
+
 def review_view(
     base: str, name: str, result: dict, *, report: bool = False, download: bool = False
 ) -> str:
@@ -372,6 +417,7 @@ def review_view(
                 "dieselbe Adresse fortgesetzt werden.</p>"
                 "<button>Historische Prüfung fortsetzen</button></form>"
             )
+    content.append(_history_comparison(result, report))
     if not findings:
         content.append("<p>Keine aktiven Befunde.</p>")
     if findings and not report:
