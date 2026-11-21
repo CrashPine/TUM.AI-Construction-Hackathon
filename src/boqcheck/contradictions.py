@@ -22,12 +22,14 @@ class Finding:
     :ivar passages: two source excerpts, each with one or more source lines.
     :ivar explanation: German explanation of the discrepancy and its uncertainty.
     :ivar question: proposed German Bieterfrage.
+    :ivar status: conflict or needs_scope_check.
     """
 
     kind: str
     passages: tuple[tuple[Line, ...], tuple[Line, ...]]
     explanation: str
     question: str
+    status: str = "needs_scope_check"
 
 
 def _drawing_findings(lines: list[Line]) -> Iterator[Finding]:

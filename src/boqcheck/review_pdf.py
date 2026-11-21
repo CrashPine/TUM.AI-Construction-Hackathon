@@ -12,6 +12,7 @@ import pymupdf
 from .contradictions import find_contradictions
 from .pdf_annotate import annotate
 from .pdf_extract import Line, extract
+from .semantic import SemanticConfig, semantic_review
 
 
 def _reference(passage: tuple[Line, ...]) -> str:
@@ -38,12 +39,15 @@ def _excerpt(passage: tuple[Line, ...]) -> str:
     return " ".join(line.text for line in passage)
 
 
-def review_pdf(filename: str, pdf_bytes: bytes, output: Path) -> dict:
+def review_pdf(
+    filename: str, pdf_bytes: bytes, output: Path, *, semantic: SemanticConfig | None = None
+) -> dict:
     """Create and verify the annotated PDF and contradiction log.
 
     :param filename: input name used to label the artifacts.
     :param pdf_bytes: complete PDF contents.
     :param output: path to a new run directory.
+    :param semantic: optional semantic checker connection and comparison budget.
     :returns: run status, artifact paths, candidate count and coverage warnings.
     :raises ValueError: if the input is not a readable, unencrypted PDF.
     :raises FileExistsError: if the output directory already exists.
@@ -60,14 +64,28 @@ def review_pdf(filename: str, pdf_bytes: bytes, output: Path) -> dict:
         pages, skipped = extract(document)
         findings = find_contradictions(pages)
         warnings = [f"PDF-Seite {page}: kein extrahierbarer Text (keine OCR)." for page in skipped]
+        coverage = "nicht ausgeführt (kein Modell konfiguriert)"
+        if semantic is not None:
+            candidates, semantic_warnings, coverage = semantic_review(pages, semantic)
+            warnings.extend(semantic_warnings)
+            for candidate in candidates:
+                left, right = candidate.passages
+                if not any(
+                    left[0] in a and right[0] in b or right[0] in a and left[0] in b
+                    for a, b in (finding.passages for finding in findings)
+                ):
+                    findings.append(candidate)
         details = []
         expected: Counter[tuple[int, str, str, str]] = Counter()
         for number, finding in enumerate(findings, 1):
             identifier = f"BG-{number:03d}"
-            section = [f"## {identifier} · Klärungsbedarf", "", finding.explanation, ""]
+            assessment = (
+                "Widerspruchskandidat" if finding.status == "conflict" else "Klärungsbedarf"
+            )
+            section = [f"## {identifier} · {assessment}", "", finding.explanation, ""]
             for passage, other in (finding.passages, finding.passages[::-1]):
                 comment = (
-                    f"{identifier} · Klärungsbedarf\n"
+                    f"{identifier} · {assessment}\n"
                     f"Gegenstelle: {_reference(other)}\n"
                     f"„{_excerpt(other)}“\n\n{finding.explanation}"
                 )
@@ -85,7 +103,8 @@ def review_pdf(filename: str, pdf_bytes: bytes, output: Path) -> dict:
                 section.extend(
                     [f"**{_reference(passage)}**", "", f"> {_excerpt(passage)}", "", outcome, ""]
                 )
-            section.extend([f"**Bieterfrage:** {finding.question}", ""])
+            if finding.question:
+                section.extend([f"**Bieterfrage:** {finding.question}", ""])
             details.extend(section)
 
         stem = re.sub(r"[^\w.-]+", "_", Path(filename).stem).strip("._") or "review"
@@ -97,7 +116,7 @@ def review_pdf(filename: str, pdf_bytes: bytes, output: Path) -> dict:
             f"**PDF-Seiten mit Text:** {len(pages) - len(skipped)}/{len(pages)}",
             f"**Kandidaten:** {len(findings)}",
             "**Prüfungen:** Verweise in Zeichnungspositionen und Körnungsgrenzen "
-            "für Schachtvierungen. Semantische Modellprüfung: nicht ausgeführt.",
+            f"für Schachtvierungen. **Semantische Modellprüfung:** {coverage}.",
             "",
         ]
         summary.extend(f"- {warning}" for warning in warnings)
@@ -137,6 +156,7 @@ def review_pdf(filename: str, pdf_bytes: bytes, output: Path) -> dict:
         "annotated_pdf": str(output / pdf_name),
         "findings_log": str(output / log_name),
         "candidates": len(findings),
+        "semantic_coverage": coverage,
         "warnings": warnings,
     }
 
@@ -146,9 +166,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pdf", type=Path, help="input PDF")
     parser.add_argument("output", type=Path, help="new output directory")
+    parser.add_argument("--endpoint", help="loopback chat completions URL")
+    parser.add_argument("--model", help="model ID exposed by the endpoint")
+    parser.add_argument("--max-requests", type=int, default=24, help="semantic comparison budget")
     args = parser.parse_args()
+    if bool(args.endpoint) != bool(args.model) or args.max_requests < 1:
+        parser.error("provide --endpoint and --model together and a positive --max-requests")
+    semantic = (
+        SemanticConfig(args.endpoint, args.model, args.max_requests) if args.endpoint else None
+    )
     try:
-        result = review_pdf(args.pdf.name, args.pdf.read_bytes(), args.output)
+        result = review_pdf(args.pdf.name, args.pdf.read_bytes(), args.output, semantic=semantic)
     except (ValueError, OSError, RuntimeError) as error:
         parser.exit(2, json.dumps({"status": "error", "message": str(error)}) + "\n")
     print(json.dumps(result, ensure_ascii=True))

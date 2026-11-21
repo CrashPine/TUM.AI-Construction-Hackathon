@@ -26,6 +26,23 @@ sizes for Schachtvierungen. Review the resulting candidates before using the pro
 Bieterfragen. Textless pages are reported as skipped. See the
 [PDF review architecture](docs/pdf-contradiction-review.md) for the data flow and remaining work.
 
+
+### Semantic review through a local model tunnel
+
+```powershell
+uv run python -m boqcheck.review_pdf "input.pdf" "runs/model-review" --endpoint http://127.0.0.1:18081/v1/chat/completions --model "<served model ID>"
+```
+
+Use the model ID exposed by the server. For OpenAI-compatible servers that expose a model list,
+query `/v1/models` on the same tunnel. Agent callers can pass
+`semantic=SemanticConfig(endpoint, model)` to `review_pdf`.
+Evidence excerpts are sent to the configured loopback endpoint and may reach its remote backend
+through the tunnel. Keep this option disabled for documents you cannot share with that backend.
+
+Semantic review compares windows of document text and checks all accepted citations against the
+source. The comparison budget defaults to 24 requests and can be adjusted with `--max-requests`.
+The log reports incomplete coverage and preserves deterministic findings when the model is unavailable.
+
 ## Challenge
 
 **Problem.** Bills of quantities often contain thousands of line items, multiple cost groups and
