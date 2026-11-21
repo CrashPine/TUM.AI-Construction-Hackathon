@@ -26,6 +26,7 @@ class CalculationFinding:
     :param stated: the amount the BoQ states, if any.
     :param computed: the amount computed from the BoQ, if it can be computed.
     :param explanation: a German explanation for the report.
+    :param item_index: 1-based position in the BoQ for line findings; None for totals.
     """
 
     kind: str
@@ -34,6 +35,7 @@ class CalculationFinding:
     stated: Decimal | None
     computed: Decimal | None
     explanation: str
+    item_index: int | None = None
 
 
 def check_calculations(boq: BoQ) -> list[CalculationFinding]:
@@ -45,7 +47,7 @@ def check_calculations(boq: BoQ) -> list[CalculationFinding]:
     :param boq: the parsed BoQ.
     :returns: the findings: line checks in item order, then sections, then the grand total.
     """
-    findings = [f for item in boq.items if (f := _check_line(item))]
+    findings = [f for index, item in enumerate(boq.items, 1) if (f := _check_line(item, index))]
     for section in boq.sections:
         items = [i for i in boq.items if i.oz.startswith(section.oz + ".")]
         finding = _check_sum("section", section.oz, section.total, items)
@@ -57,10 +59,11 @@ def check_calculations(boq: BoQ) -> list[CalculationFinding]:
     return findings
 
 
-def _check_line(item: Item) -> CalculationFinding | None:
+def _check_line(item: Item, index: int) -> CalculationFinding | None:
     """Check that the total of a priced item is quantity × unit price.
 
     :param item: the item.
+    :param index: the 1-based item position in the BoQ.
     :returns: a finding, or None if the item is unpriced or correct.
     """
     if item.unit_price is None and item.total is None:
@@ -69,6 +72,7 @@ def _check_line(item: Item) -> CalculationFinding | None:
         return CalculationFinding(
             "line", item.oz, "inconclusive", item.total, None,
             f"Position {item.oz}: Menge, Einheitspreis oder Gesamtbetrag fehlt.",
+            item_index=index,
         )  # fmt: skip
     computed = (item.quantity * item.unit_price).quantize(CENT, ROUND_HALF_UP)
     if computed == item.total:
@@ -79,11 +83,13 @@ def _check_line(item: Item) -> CalculationFinding | None:
             "line", item.oz, "inconclusive", item.total, computed,
             f"Bedarfsposition {item.oz}: Gesamtbetrag 0, {item.quantity} × {item.unit_price} "
             f"ergibt {computed}.",
+            item_index=index,
         )  # fmt: skip
     return CalculationFinding(
         "line", item.oz, "mismatch", item.total, computed,
         f"Position {item.oz}: {item.quantity} × {item.unit_price} ergibt {computed}, "
         f"angegeben ist {item.total}.",
+        item_index=index,
     )  # fmt: skip
 
 
@@ -117,7 +123,12 @@ def _check_sum(
             f"{label}: Summe 0 angegeben, die Positionen ergeben {computed}.",
         )  # fmt: skip
     gaps = _missing_ozs(items)
-    hint = f" Fehlende Ordnungszahlen: {', '.join(gaps)}." if gaps else ""
+    hint = (
+        f" Lücken in der OZ-Nummerierung ({', '.join(gaps)}) "
+        "sind kein Nachweis fehlender Leistungen."
+        if gaps
+        else ""
+    )
     return CalculationFinding(
         kind, oz, "mismatch", stated, computed,
         f"{label}: angegeben {stated}, Summe der Positionen {computed}, "

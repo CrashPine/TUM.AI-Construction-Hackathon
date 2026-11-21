@@ -60,6 +60,9 @@ verification.
 - [x] Import GAEB 90 D84, D83 and D86 through the parser. Fixture tests cover counts, prices and OZs.
 - [x] Connect D83, D84 and D86 to the web review and HTML export. Verify all five uploads,
   missing quantities in the price-only D84 and a changed price with original record evidence.
+- [x] Link duplicate OZ occurrences and GAEB 90 price calculations to effective physical records;
+  show uncheckable sums and skipped positions. Warn that position types and price bases are not
+  fully recognized and that price checks assume one quantity unit per unit price.
 - [ ] Add supporting DOCX and mapped XLSX imports with evidence.
 - [ ] Accept a supporting DOCX in the same LV review after its source anchors are verified.
 - [x] Label unsupported upload formats in the UI until their adapters pass fixture checks.
