@@ -23,7 +23,7 @@ from .history_jobs import (
 from .review_pdf import review_pdf
 from .semantic import SemanticConfig
 from .spelling import load_lexicon
-from .web_gaeb import review_x83
+from .web_gaeb import review_legacy, review_x83
 from .web_views import STATUSES, review_view, upload_view
 
 _RUN = re.compile(r"/review/([a-f0-9]{32})(?:/(pdf|log|report|resume))?")
@@ -126,7 +126,11 @@ def _analyse(
         return result, data
     if suffix == ".x83":
         return review_x83(name, _read_body(env, _MAX_UPLOAD, media_type="application/xml")), None
-    raise ValueError("Unterstützt werden PDF und GAEB X83.")
+    if suffix in (".d83", ".d84", ".d86"):
+        return review_legacy(
+            name, _read_body(env, _MAX_UPLOAD, media_type="application/octet-stream")
+        ), None
+    raise ValueError("Unterstützt werden PDF und GAEB X83, D83, D84 und D86.")
 
 
 def _apply_history(path: Path, result: dict, trade: str) -> None:

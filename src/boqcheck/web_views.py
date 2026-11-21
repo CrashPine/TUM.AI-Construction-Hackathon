@@ -58,9 +58,9 @@ main{padding:0;max-width:none}article{break-inside:avoid}}
 
 _UPLOAD = """
 <form id="upload">
-  <label for="lv">Leistungsverzeichnis als PDF oder GAEB X83</label>
-  <input id="lv" type="file" accept=".pdf,.x83,application/pdf" required>
-  <p class="badge">GAEB 90, DOCX und XLSX werden derzeit nicht unterstützt.</p>
+  <label for="lv">Leistungsverzeichnis als PDF oder GAEB X83, D83, D84, D86</label>
+  <input id="lv" type="file" accept=".pdf,.x83,.d83,.d84,.d86,application/pdf" required>
+  <p class="badge">DOCX und XLSX werden derzeit nicht unterstützt.</p>
   <!--model-option-->
   <!--history-option-->
   <div class="actions"><button>Datei prüfen</button></div>
@@ -76,7 +76,9 @@ input.addEventListener('change', () => {
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const file = input.files[0];
-  const type = file.name.toLowerCase().endsWith('.x83') ? 'application/xml' : 'application/pdf';
+  const suffix = file.name.split('.').pop().toLowerCase();
+  const types = {pdf: 'application/pdf', x83: 'application/xml'};
+  const type = types[suffix] || 'application/octet-stream';
   const status = document.querySelector('#progress');
   const button = form.querySelector('button');
   button.disabled = true;
@@ -165,6 +167,8 @@ def _finding(base: str, finding: dict, report: bool, history: bool) -> str:
         ref = escape(source["reference"])
         if not report and "position" in source:
             ref = f'<a href="#position-{source["position"]}">{ref}</a>'
+        elif not report and "record" in source:
+            ref = f'<a href="#record-{source["record"]}">{ref}</a>'
         elif not report:
             ref = (
                 f'<a href="{base}/pdf#page={source["page"]}" target="_blank" rel="noopener">'
@@ -217,10 +221,11 @@ def _finding(base: str, finding: dict, report: bool, history: bool) -> str:
     return "".join(pieces)
 
 
-def _positions(items: tuple[Item, ...]) -> str:
+def _positions(items: tuple[Item, ...], legacy: bool = False) -> str:
     """Render the normalized GAEB positions with finding anchors.
 
     :param items: parsed positions in source order.
+    :param legacy: include the two legacy price columns.
     :returns: an HTML table with quantities, units and both description fields.
     """
     rows = []
@@ -231,13 +236,23 @@ def _positions(items: tuple[Item, ...]) -> str:
                 f"<details><summary>Langtext</summary><p>{escape(item.long_text)}</p></details>"
             )
         qty = str(item.quantity) if item.quantity is not None else "–"
+        prices = (
+            "".join(
+                f"<td>{v if v is not None else '–'}</td>" for v in (item.unit_price, item.total)
+            )
+            if legacy
+            else ""
+        )
         rows.append(
             f'<tr id="position-{number}"><th scope="row">{escape(item.oz) or "–"}</th>'
-            f"<td>{description}</td><td>{escape(qty)}</td><td>{escape(item.unit) or '–'}</td></tr>"
+            f"<td>{description}</td><td>{escape(qty)}</td>"
+            f"<td>{escape(item.unit) or '–'}</td>{prices}</tr>"
         )
     return (
         '<h2 id="positions">Positionen</h2><div class="table"><table><thead>'
-        "<tr><th>OZ</th><th>Leistung</th><th>Menge</th><th>ME</th></tr></thead><tbody>"
+        "<tr><th>OZ</th><th>Leistung</th><th>Menge</th><th>ME</th>"
+        + ("<th>EP</th><th>Gesamtbetrag</th>" if legacy else "")
+        + "</tr></thead><tbody>"
         + "".join(rows)
         + "</tbody></table></div>"
     )
@@ -288,7 +303,11 @@ def review_view(
             f"{gaeb['arithmetic_skipped']} übersprungen.</p>"
         )
         if gaeb["arithmetic_checked"] == gaeb["arithmetic_skipped"] == 0:
-            content.append("<p>Keine Preisangaben. Für X83 ist das zulässig.</p>")
+            if version != "90" or phase == "83":
+                format_name = "D83" if version == "90" else "X83"
+                content.append(f"<p>Keine Preisangaben. Für {format_name} ist das zulässig.</p>")
+            else:
+                content.append("<p>Keine prüfbaren Preisangaben.</p>")
     else:
         if model := result.get("semantic_model"):
             content.append(f'<p class="badge">Lokales Modell: {escape(model)}</p>')
@@ -351,5 +370,12 @@ def review_view(
             ]
         )
     elif gaeb:
-        content.append(_positions(result["positions"]))
+        content.append(_positions(result["positions"], "records" in result))
+        if records := result.get("records"):
+            content.append("<h2>Quelldatensätze</h2>")
+            content.extend(
+                f'<details id="record-{i}"><summary>Zeile {i} · {escape(label)}</summary>'
+                f"<pre>{escape(raw)}</pre></details>"
+                for i, label, raw in records
+            )
     return _page("Risikobericht" if report else "Befunde prüfen", "".join(content))

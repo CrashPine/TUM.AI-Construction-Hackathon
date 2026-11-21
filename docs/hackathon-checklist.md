@@ -58,7 +58,9 @@ verification.
 - [ ] Extend PDF arithmetic to other table layouts, numerical token roles beyond labelled price fields,
   unit conversions and other subtotal layouts.
 - [x] Import GAEB 90 D84, D83 and D86 through the parser. Fixture tests cover counts, prices and OZs.
-- [ ] Connect GAEB 90 to the web review and add supporting DOCX and mapped XLSX imports with evidence.
+- [x] Connect D83, D84 and D86 to the web review and HTML export. Verify all five uploads,
+  missing quantities in the price-only D84 and a changed price with original record evidence.
+- [ ] Add supporting DOCX and mapped XLSX imports with evidence.
 - [ ] Accept a supporting DOCX in the same LV review after its source anchors are verified.
 - [x] Label unsupported upload formats in the UI until their adapters pass fixture checks.
 - [ ] Check historical quantity and unit-price anomalies using comparable records and explicit units.
