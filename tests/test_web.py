@@ -14,6 +14,7 @@ from zipfile import ZipFile
 
 import pymupdf
 import pytest
+from openpyxl import Workbook
 
 from boqcheck import semantic
 from boqcheck.docx_context import read_context
@@ -837,3 +838,33 @@ def test_german_spelling_is_grounded_and_editable(
     report = _request(app, run + "/report")[2].decode()
     assert "Originalwort: <strong>ausführren" in report
     assert "Korrekturvorschlag: <strong>durchführen" in report
+
+
+def test_xlsx_sheet_row_report(tmp_path: Path) -> None:
+    """Trace arithmetic and formula findings to the physical spreadsheet rows.
+
+    :param tmp_path: isolated web review storage.
+    """
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Dach"
+    sheet.append(["OZ", "Kurztext", "Menge", "ME", "EP", "Preisbasis", "Gesamtbetrag"])
+    sheet.append(["01.01.0010", "Dachplatte", "1.000,0", "m", 2, 100, 19.99])
+    sheet.append([])
+    sheet.append(["01.01.0020", "Rohr", "=1+1", "m"])
+    workbook.create_sheet("Hinweise").append(["Text"])
+    data = BytesIO()
+    workbook.save(data)
+    app = make_app(tmp_path)
+    status, headers, _ = _request(
+        app, "/upload?name=sample.XLSX", data.getvalue(), "application/octet-stream"
+    )
+    assert status.startswith("303")
+    run = headers["Location"]
+    review = _request(app, run)[2].decode()
+    assert 'href="#position-1"' in review and 'id="position-1"' in review
+    report = _request(app, run + "/report?download=1")[2].decode()
+    assert "XLSX · 2 Positionen" in report
+    assert "Blatt Dach · Zeile 2" in report and "Blatt Dach · Zeile 4" in report
+    assert "20.00" in report and "19.99" in report and "=1+1" in report
+    assert "Blatt Hinweise" in report

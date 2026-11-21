@@ -47,7 +47,16 @@ def review_x83(name: str, data: bytes) -> dict:
     :param data: uploaded XML bytes.
     :returns: findings with position references and arithmetic coverage.
     """
-    boq = parse(name, data)
+    return review_positions(parse(name, data))
+
+
+def review_positions(boq: BoQ, references: list[str] | None = None) -> dict:
+    """Prepare the shared structural and arithmetic report.
+
+    :param boq: normalized positions.
+    :param references: optional sheet and row labels in source order.
+    :returns: shared web review.
+    """
     report = check_boq(boq)
     findings = []
     for number, finding in enumerate(report["findings"], 1):
@@ -58,7 +67,8 @@ def review_x83(name: str, data: bytes) -> dict:
             sources.append(
                 {
                     "position": index,
-                    "reference": f"Position {index}" + (f" · OZ {item.oz}" if item.oz else ""),
+                    "reference": (references[index - 1] if references else f"Position {index}")
+                    + (f" · OZ {item.oz}" if item.oz else ""),
                     "excerpt": item.short_text or item.long_text or "Keine Leistungsbeschreibung.",
                 }
             )
@@ -66,11 +76,11 @@ def review_x83(name: str, data: bytes) -> dict:
             {
                 "id": f"BG-{number:03d}",
                 "assessment": _TITLES[finding["code"]],
-                "method": "GAEB-Struktur- und Preisprüfung",
+                "method": "Struktur- und Preisprüfung",
                 "category": "Preisprüfung"
                 if finding["code"] == "line_total_mismatch"
                 else "LV-Struktur",
-                "evidence": "Aus den angegebenen GAEB-Feldern nachvollziehbar",
+                "evidence": "Aus den angegebenen Quellfeldern nachvollziehbar",
                 "impact": _IMPACTS[finding["code"]],
                 "explanation": _explanation(finding),
                 "question": "",
@@ -82,6 +92,7 @@ def review_x83(name: str, data: bytes) -> dict:
         "warnings": report["warnings"],
         "gaeb": report,
         "positions": boq.items,
+        "sheet_references": references,
     }
 
 

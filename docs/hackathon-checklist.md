@@ -68,7 +68,7 @@ verification.
   Checked the supplied 53 nonempty paragraphs; styled headings and cells use a synthetic fixture.
 - [x] Attach a DOCX to a specific LV, select a source for a finding and export the excerpt
   with its filename and paragraph or cell reference. Verify upload isolation and retry.
-- [ ] Add mapped XLSX import with worksheet and row evidence.
+- [x] Add mapped XLSX import with worksheet and row evidence. Verified via synthetic workbook upload and HTML export.
 - [x] Label unsupported upload formats in the UI until their adapters pass fixture checks.
 - [ ] Check historical quantity and unit-price anomalies using comparable records and explicit units.
 - [ ] Add the separate legal retrieval demo after the core workflow.
