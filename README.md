@@ -36,7 +36,10 @@ quantities. An optional DOCX attachment belongs to the uploaded LV. Open its sou
 select a paragraph or table cell for a finding, and save the review to include that excerpt
 in the HTML report. For PDFs, an attached DOCX also supports automatic comparison of explicitly labelled fields.
 Use the same OZ and component title, followed by a property such as a thickness in the next
-paragraph. The web review and HTML export show the matched sources. Other excerpts can be cited manually. XLSX import remains open.
+paragraph. The web review and HTML export show the matched sources. Other excerpts can be cited manually. XLSX uses exact first-row headers `OZ`, `Kurztext`, `Menge`, `ME`. Optional price columns are
+`EP`, `Preisbasis` and `Gesamtbetrag`. Store OZ as text to preserve leading zeros. Use values
+in the numeric columns, as formulas are reported as unreadable numeric fields. Unmapped sheets
+are reported and skipped. Findings cite the original sheet and row.
 
 To make local Ollama available for PDF uploads, start the server with:
 

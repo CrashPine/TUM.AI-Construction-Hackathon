@@ -3,7 +3,12 @@ name = "boqcheck"
 version = "0.1.0"
 description = "Find errors and risks in German bills of quantities (LV)"
 requires-python = ">=3.12"
-dependencies = ["pymupdf>=1.26,<2", "pyspellchecker>=0.9,<1"]
+dependencies = [
+    "defusedxml>=0.7.1",
+    "openpyxl>=3.1,<4",
+    "pymupdf>=1.26,<2",
+    "pyspellchecker>=0.9,<1",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.5,<0.14.0"]

@@ -58,11 +58,11 @@ main{padding:0;max-width:none}article{break-inside:avoid}}
 
 _UPLOAD = """
 <form id="upload">
-  <label for="lv">Leistungsverzeichnis als PDF oder GAEB X83, D83, D84, D86</label>
-  <input id="lv" type="file" accept=".pdf,.x83,.d83,.d84,.d86,application/pdf" required>
+  <label for="lv">Leistungsverzeichnis als PDF oder GAEB X83, D83, D84, D86 oder XLSX</label>
+  <input id="lv" type="file" accept=".pdf,.x83,.d83,.d84,.d86,.xlsx,application/pdf" required>
   <label for="attachment">Anlage zum LV (DOCX, optional)</label>
   <input id="attachment" type="file" accept=".docx">
-  <p class="badge">XLSX wird derzeit nicht unterstützt.</p>
+  <p class="badge">XLSX-Kopfzeile: OZ, Kurztext, Menge, ME.</p>
   <!--model-option-->
   <!--history-option-->
   <div class="actions"><button>Datei prüfen</button></div>
@@ -241,16 +241,21 @@ def _finding(base: str, finding: dict, report: bool, history: bool) -> str:
     return "".join(pieces)
 
 
-def _positions(items: tuple[Item, ...], legacy: bool = False) -> str:
+def _positions(
+    items: tuple[Item, ...], legacy: bool = False, references: list[str] | None = None
+) -> str:
     """Render the normalized GAEB positions with finding anchors.
 
     :param items: parsed positions in source order.
-    :param legacy: include the two legacy price columns.
+    :param legacy: include the two price columns.
+    :param references: optional sheet and row labels.
     :returns: an HTML table with quantities, units and both description fields.
     """
     rows = []
     for number, item in enumerate(items, 1):
         description = escape(item.short_text)
+        if references:
+            description += f"<p>{escape(references[number - 1])}</p>"
         if item.long_text:
             description += (
                 f"<details><summary>Langtext</summary><p>{escape(item.long_text)}</p></details>"
@@ -315,15 +320,19 @@ def review_view(
         )
 
     if gaeb := result.get("gaeb"):
+        spreadsheet = bool(result.get("sheet_references"))
         version = escape(gaeb["version"] or "unbekannt")
         phase = escape(gaeb["phase"] or "unbekannt")
+        label = "XLSX" if spreadsheet else f"GAEB {version} · Phase {phase}"
         content.append(
-            f'<p class="badge">GAEB {version} · Phase {phase} · {gaeb["items"]} Positionen</p>'
+            f'<p class="badge">{label} · {gaeb["items"]} Positionen</p>'
             f"<p>Preisprüfung: {gaeb['arithmetic_checked']} Gesamtbeträge geprüft, "
             f"{gaeb['arithmetic_skipped']} übersprungen.</p>"
         )
         if gaeb["arithmetic_checked"] == gaeb["arithmetic_skipped"] == 0:
-            if version != "90" or phase == "83":
+            if spreadsheet:
+                content.append("<p>Keine Preisangaben.</p>")
+            elif version != "90" or phase == "83":
                 format_name = "D83" if version == "90" else "X83"
                 content.append(f"<p>Keine Preisangaben. Für {format_name} ist das zulässig.</p>")
             else:
@@ -428,7 +437,10 @@ def review_view(
             ]
         )
     elif gaeb:
-        content.append(_positions(result["positions"], "records" in result))
+        references = result.get("sheet_references")
+        content.append(
+            _positions(result["positions"], "records" in result or bool(references), references)
+        )
         if records := result.get("records"):
             content.append("<h2>Quelldatensätze</h2>")
             content.extend(
