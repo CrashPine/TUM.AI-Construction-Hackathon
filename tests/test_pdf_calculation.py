@@ -14,12 +14,15 @@ from boqcheck.semantic import SemanticConfig
 
 
 @pytest.mark.parametrize(
-    ("total", "unit", "operand", "checked", "mismatch"),
+    ("total", "unit", "operand", "checked", "mismatch", "expected"),
     [
-        ("12,34", "m", "qty", 1, True),
-        ("12,35", "m", "qty", 1, False),
-        ("12,34", "kg", "qty", 0, False),
-        ("12,34", "m", "total", 0, False),
+        ("12,34", "m", "qty", 1, True, "12.35"),
+        ("12,35", "m", "qty", 1, False, ""),
+        ("12,34", "kg", "qty", 0, False, ""),
+        ("12,34", "m", "total", 0, False, ""),
+        ("1.234,49", "cm", "qty", 1, True, "1234.50"),
+        ("1.234,50", "cm", "qty", 1, False, ""),
+        ("12,34", "cm2", "qty", 0, False, ""),
     ],
 )
 def test_price_review(
@@ -30,6 +33,7 @@ def test_price_review(
     operand: str,
     checked: int,
     mismatch: bool,
+    expected: str,
 ) -> None:
     """Require a matching source unit, exact operands and half-up cents.
 
@@ -40,6 +44,7 @@ def test_price_review(
     :param operand: token used as the first factor.
     :param checked: expected number of verified expressions.
     :param mismatch: whether the export must contain a discrepancy.
+    :param expected: normalized expected total when a discrepancy exists.
     """
     with pymupdf.open() as pdf:
         page = pdf.new_page()
@@ -76,8 +81,15 @@ def test_price_review(
     if mismatch:
         (finding,) = result["findings"]
         assert len(finding["sources"]) == 3
-        assert "12.35 EUR" in finding["explanation"]
-        assert "12.34 EUR" in Path(tmp_path / "out/price.contradictions.md").read_text("utf8")
+        assert f"{expected} EUR" in finding["explanation"]
+        if unit == "cm":
+            assert (
+                "100000,0 cm".replace(",", ".") in finding["explanation"]
+                or "100000 cm" in finding["explanation"]
+            )
+        assert f"Gesamtbetrag: {total} EUR" in Path(
+            tmp_path / "out/price.contradictions.md"
+        ).read_text("utf8")
 
 
 def test_real_ep_gp_table() -> None:
