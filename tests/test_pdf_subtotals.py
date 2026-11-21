@@ -17,12 +17,13 @@ def test_summary_cent_difference() -> None:
     with pymupdf.open(_RAW / "Abgabe LV.pdf") as document:
         pages, _ = extract(document)
     findings, coverage = table_prices(pages)
-    assert "23/23" in coverage and not findings
+    assert "23/23" in coverage and "Summenhierarchie: 12/12" in coverage and not findings
     page = pages[-1]
     i = next(i for i, cell in enumerate(page) if cell.text == "4.353,60")
     page[i] = replace(page[i], text="4.353,61")
     findings, _ = table_prices(pages)
-    (finding,) = findings
+    finding, hierarchy = findings
+    assert hierarchy.kind == "hierarchy_total" and page[i] in hierarchy.passages[-1]
     assert finding.kind == "section_total" and "4353.61" in finding.explanation
     assert "4353.60" in finding.explanation and finding.passages[0][-1] == page[i]
     assert len(finding.passages) == 10

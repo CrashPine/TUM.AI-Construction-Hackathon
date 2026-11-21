@@ -60,7 +60,10 @@ verification.
 - [x] Give every PDF number a role (input, derived, identifier, specification, unknown) with an exact
   source ID, and accept model price formulas only as allowlisted add/sub/mul/div trees over the group's
   token IDs that are dimensionally consistent and equal quantity × price / basis. Report unchecked values.
-- [ ] Extend PDF arithmetic to other table layouts and other subtotal layouts.
+- [x] Reconcile the summary hierarchy and tax totals in both priced PDFs (12 checks in Abgabe LV.pdf,
+  43 in Angebot AN24-0305.pdf: copies, area and grand totals, net, VAT, gross and carry-overs).
+  Abstain on missing or duplicated cells and detect a one-cent change.
+- [ ] Extend PDF arithmetic to table and subtotal layouts beyond the two priced samples.
 - [x] Import GAEB 90 D84, D83 and D86 through the parser. Fixture tests cover counts, prices and OZs.
 - [x] Connect D83, D84 and D86 to the web review and HTML export. Verify all five uploads,
   missing quantities in the price-only D84 and a changed price with original record evidence.

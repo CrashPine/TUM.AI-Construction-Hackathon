@@ -7,6 +7,7 @@ from decimal import ROUND_HALF_UP, Decimal, localcontext
 from .contradictions import Finding
 from .pdf_calculation import _NUMBER
 from .pdf_extract import Line
+from .pdf_hierarchy_totals import hierarchy_totals
 from .pdf_subtotals import SectionTotals
 
 
@@ -175,8 +176,11 @@ def table_prices(pages: list[list[Line]]) -> tuple[list[Finding], str]:
     findings.extend(sections.findings)
     for section in split_sections.values():
         findings.extend(section.findings)
+    hierarchy, hierarchy_checked, hierarchy_stated = hierarchy_totals(pages)
+    findings.extend(hierarchy)
     return findings, (
         f"EP/GP-Tabellen: {checked}/{eligible} erkannte Positionszeilen geprüft. "
         f"Abschnittssummen: {sections.checked + summary_checked}/"
-        f"{sections.stated + summary_stated} geprüft."
+        f"{sections.stated + summary_stated} geprüft. "
+        f"Summenhierarchie: {hierarchy_checked}/{hierarchy_stated} geprüft."
     )
