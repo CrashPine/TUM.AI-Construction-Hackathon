@@ -8,14 +8,39 @@ from .contradictions import Finding
 from .pdf_extract import Line
 
 _NUMBER = r"(?:[0-9]{1,3}(?:\.[0-9]{3})+|[0-9]+)(?:,[0-9]+)?"
-_UNIT = r"(?:m²|m³|m2|m3|m|kg|t|Stk\.?|St\.)"
-_QTY = re.compile(rf"Menge\s*:\s*(?P<qty>{_NUMBER})\s*(?P<unit>{_UNIT})", re.I)
+_UNITS = {
+    "mm": ("length", -3),
+    "cm": ("length", -2),
+    "m": ("length", 0),
+    "mm2": ("area", -6),
+    "cm2": ("area", -4),
+    "m2": ("area", 0),
+    "mm3": ("volume", -9),
+    "cm3": ("volume", -6),
+    "m3": ("volume", 0),
+    "g": ("mass", -3),
+    "kg": ("mass", 0),
+    "t": ("mass", 3),
+    "st": ("count", 0),
+    "stk": ("count", 0),
+}
+_UNIT = r"(?:mm|cm|m)(?:[²³23])?|kg|g|t|Stk?\.?"
+_QTY = re.compile(rf"Menge\s*:\s*(?P<qty>{_NUMBER})\s*(?P<unit>(?:{_UNIT}))", re.I)
 _PRICE = re.compile(
     rf"(?:EP|Einheitspreis)\s*:\s*(?P<price>{_NUMBER})\s*(?:EUR|€)\s*"
-    rf"(?:/|je|pro)\s*(?P<basis>{_NUMBER})\s*(?P<unit>{_UNIT})",
+    rf"(?:/|je|pro)\s*(?P<basis>{_NUMBER})\s*(?P<unit>(?:{_UNIT}))",
     re.I,
 )
 _TOTAL = re.compile(rf"(?:GB|Gesamtbetrag)\s*:\s*(?P<total>{_NUMBER})\s*(?:EUR|€)", re.I)
+
+
+def _unit(raw: str) -> tuple[str, int]:
+    """Read the dimension and base-ten scale of a recognized unit.
+
+    :param raw: source spelling captured by the unit grammar.
+    :returns: dimension name and exponent relative to the base unit.
+    """
+    return _UNITS[raw.casefold().rstrip(".").replace("²", "2").replace("³", "3")]
 
 
 def price_groups(sources: dict[str, Line]) -> dict:
@@ -48,7 +73,10 @@ def price_groups(sources: dict[str, Line]) -> dict:
             continue
         parts = {role: entries[0] for role, entries in fields.items()}
         positions = [part[0] for part in parts.values()]
-        if max(positions) - min(positions) != 2 or parts["qty"][4] != parts["price"][4]:
+        if (
+            max(positions) - min(positions) != 2
+            or _unit(parts["qty"][4])[0] != _unit(parts["price"][4])[0]
+        ):
             continue
         if any(len(part[3]) > 18 for part in parts.values()):
             continue
@@ -75,13 +103,18 @@ def evaluate_price(group: tuple, expr: object) -> tuple[bool, Finding | None]:
     )
     if not basis or actual.as_tuple().exponent < -2:
         return False, None
+    source_unit, price_unit = parts["qty"][4], parts["price"][4]
+    shift = _unit(source_unit)[1] - _unit(price_unit)[1]
     with localcontext() as context:
         context.prec = 80
-        expected = (qty * price / basis).quantize(Decimal(".01"), rounding=ROUND_HALF_UP)
+        converted = qty.scaleb(shift)
+        expected = (converted * price / basis).quantize(Decimal(".01"), rounding=ROUND_HALF_UP)
     if actual == expected:
         return True, None
+    conversion = f"{qty} {source_unit} = {converted:f} {price_unit}. " if shift else ""
     explanation = (
-        f"Gesamtbetrag laut LV: {actual} EUR. Rechnung: {qty} × {price} / {basis} "
+        f"Gesamtbetrag laut LV: {actual} EUR. {conversion}"
+        f"Rechnung: {converted:f} × {price} / {basis} "
         f"= {expected} EUR (auf Cent gerundet)."
     )
     return True, Finding(
