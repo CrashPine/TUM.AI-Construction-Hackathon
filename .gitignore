@@ -8,3 +8,6 @@
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+
+# Default local review database, including any SQLite sidecar files.
+bidguard-history.sqlite3*

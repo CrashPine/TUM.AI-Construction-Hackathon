@@ -33,6 +33,9 @@ class Item:
     :ivar lump_sum: True for a lump-sum item (Pauschalposition).
     :ivar unit_price: the unit price (Einheitspreis, EP), or None if the file gives none.
     :ivar total: the line total (Gesamtbetrag, GB), or None if the file gives none.
+    :ivar price_basis: explicitly supplied number of units covered by the unit price.
+    :ivar invalid_numbers: XML field names and raw invalid numeric values.
+    :ivar adjusted_total: whether an explicit price adjustment prevents a simple check.
     """
 
     oz: str
@@ -44,6 +47,17 @@ class Item:
     lump_sum: bool = False
     unit_price: Decimal | None = None
     total: Decimal | None = None
+    price_basis: Decimal | None = None
+    invalid_numbers: tuple[tuple[str, str], ...] = ()
+    adjusted_total: bool = False
+
+    @property
+    def line_total(self) -> Decimal | None:
+        """Read the stated line total for XML review.
+
+        :returns: the supplied Gesamtbetrag, including an explicit zero.
+        """
+        return self.total
 
 
 @dataclass(frozen=True)
@@ -55,6 +69,10 @@ class BoQ:
     :ivar sections: the sections in document order.
     :ivar items: the items in document order.
     :ivar total: the net total of the BoQ the file states, or None if it states none.
+    :ivar version: GAEB XML version from the header or a recognized namespace.
+    :ivar namespace: XML namespace declared on the root.
+    :ivar version_date: schema edition from GAEBInfo/VersDate.
+    :ivar warnings: importer coverage warnings.
     """
 
     source: str
@@ -62,3 +80,7 @@ class BoQ:
     sections: tuple[Section, ...]
     items: tuple[Item, ...]
     total: Decimal | None = None
+    version: str | None = None
+    namespace: str | None = None
+    version_date: str | None = None
+    warnings: tuple[str, ...] = ()

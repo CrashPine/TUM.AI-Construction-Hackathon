@@ -16,20 +16,22 @@ _GRAIN = re.compile(r"Körnung\s+bis\s+höchstens\s+(\d+(?:[,.]\d+)?)\s*mm\b", r
 
 @dataclass(frozen=True)
 class Finding:
-    """A candidate supported by two passages.
+    """A candidate supported by source passages.
 
     :ivar kind: deterministic check identifier.
-    :ivar passages: two source excerpts, each with one or more source lines.
+    :ivar passages: source excerpts, each with one or more source lines.
     :ivar explanation: German explanation of the discrepancy and its uncertainty.
     :ivar question: proposed German Bieterfrage.
     :ivar status: conflict or needs_scope_check.
+    :ivar spelling: original word, replacement and exact line offsets for a typo.
     """
 
     kind: str
-    passages: tuple[tuple[Line, ...], tuple[Line, ...]]
+    passages: tuple[tuple[Line, ...], ...]
     explanation: str
     question: str
     status: str = "needs_scope_check"
+    spelling: tuple[str, str, int, int] | None = None
 
 
 def _drawing_findings(lines: list[Line]) -> Iterator[Finding]:
@@ -110,3 +112,25 @@ def find_contradictions(pages: list[list[Line]]) -> list[Finding]:
                     )
                 )
     return findings
+
+
+def rule_scope(pages: list[list[Line]]) -> list[str]:
+    """Identify the position and component cues needed by the existing PDF rules.
+
+    :param pages: source lines by page.
+    :returns: rule identifiers with applicable text in the document.
+    """
+    has_drawings = has_roof = has_shaft = False
+    for page in pages:
+        for line in page:
+            has_drawings |= bool(line.oz and _DRAWINGS.search(line.text))
+            has_roof |= bool(_ROOF.search(line.text))
+            has_shaft |= bool(_SHAFT.search(line.text))
+    return [
+        rule
+        for rule, applicable in (
+            ("scope_reference", has_drawings and has_roof),
+            ("aggregate_limit", has_shaft),
+        )
+        if applicable
+    ]

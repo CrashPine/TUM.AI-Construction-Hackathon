@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from boqcheck import parse
+from boqcheck.gaeb_checks import check_boq
 from boqcheck.gaeb_xml import parse_gaeb_xml
 from boqcheck.model import BoQ, Item
 
@@ -202,3 +203,58 @@ def test_parse_rejects_unknown_suffix():
     """parse() raises ValueError for a file type that no parser handles."""
     with pytest.raises(ValueError, match="unsupported file type"):
         parse("LV.pdf", b"%PDF-1.7")
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16"])
+@pytest.mark.parametrize("declaration", ["[<!ENTITY sample 'test'>]", 'SYSTEM "never-read.dtd"'])
+def test_dtd_is_rejected(encoding: str, declaration: str) -> None:
+    """Reject declarations regardless of external references or XML encoding.
+
+    :param encoding: XML byte encoding.
+    :param declaration: internal entity or external DTD declaration.
+    """
+    data = (f"<!DOCTYPE GAEB {declaration}>" + _xml("").decode()).encode(encoding)
+    with pytest.raises(ValueError, match="DTD"):
+        parse("uploaded.X83", data)
+
+
+@pytest.mark.parametrize(("name", "version"), [(SAS, "3.1"), (PROJEKT, "3.2")])
+def test_unpriced_x83_metadata_and_checks(name: str, version: str) -> None:
+    """Report the observed GAEB edition and leave empty prices alone.
+
+    :param name: representative X83 fixture name.
+    :param version: version supplied by the fixture.
+    """
+    boq = _boq(name)
+    report = check_boq(boq)
+    assert boq.version == version and boq.version_date and boq.namespace
+    assert report["phase"] == "83"
+    assert report["arithmetic_checked"] == report["arithmetic_skipped"] == 0
+    assert all(item.unit_price is None and item.line_total is None for item in boq.items)
+
+
+def test_invalid_and_missing_fields_and_totals() -> None:
+    """Keep bad cells local to the item and round totals on an explicit price basis."""
+    body = """<BoQBody><Itemlist>
+      <Item RNoPart="1"><Qty>2</Qty><QU>m</QU><UP>10.025</UP>
+        <PriceBasis>2</PriceBasis><IT>10.03</IT></Item>
+      <Item RNoPart="0001"><Qty>2</Qty><QU>m</QU><UP>10.025</UP>
+        <PriceBasis>2</PriceBasis><IT>10.02</IT></Item>
+      <Item RNoPart="2"><Qty>2</Qty><QU>m</QU><UP>0</UP><PriceBasis>1</PriceBasis><IT>0</IT></Item>
+      <Item RNoPart="3"><Qty>NaN</Qty><UP>3,14</UP></Item>
+      <Item RNoPart="4"><Qty>2</Qty><QU>m</QU><UP>2</UP><IT>4</IT></Item>
+      <Item RNoPart="5"><Qty>2</Qty><QU>m</QU><UP>2</UP><PriceBasis>1</PriceBasis>
+        <IT>3</IT><DiscountPcnt>25</DiscountPcnt></Item>
+      <Item RNoPart="6"><LumpSumItem>Yes</LumpSumItem></Item>
+      <Item />
+    </Itemlist></BoQBody>"""
+    boq = parse("synthetic.X83", _xml(body))
+    assert boq.items[2].unit_price == 0 and boq.items[3].unit_price is None
+    assert boq.items[3].invalid_numbers == (("Qty", "NaN"), ("UP", "3,14"))
+    report = check_boq(boq)
+    assert report["arithmetic_checked"] == 3 and report["arithmetic_skipped"] == 2
+    assert {"code": "duplicate_oz", "oz": "0001", "items": [1, 2]} in report["findings"]
+    (mismatch,) = [f for f in report["findings"] if f["code"] == "line_total_mismatch"]
+    assert (mismatch["item"], mismatch["actual"], mismatch["expected"]) == (2, "10.02", "10.03")
+    missing = {f["item"]: f["fields"] for f in report["findings"] if f["code"] == "missing_fields"}
+    assert missing[7] == ["Description"] and "RNoPart" in missing[8]

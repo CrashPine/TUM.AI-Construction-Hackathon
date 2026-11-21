@@ -12,6 +12,61 @@ BoQ data model. Checks, the risk report and the upload page do not exist yet.
 
 ## Local PDF contradiction review
 
+The PDF checks also flag explicitly open specifications and compensation terms when the
+surrounding LV does not resolve them. Findings include the relevant OZ and a German
+Bieterfrage. A missing separate line item does not trigger this check.
+
+Start the web prototype without a model:
+
+```powershell
+uv sync --locked
+uv run python -m boqcheck.web
+```
+
+Open `http://127.0.0.1:8000` and upload `data/raw/LV_09_Porenbetondach.pdf`. The PDF review shows
+both excerpts and links to the annotated source. Set the review status, edit the Bieterfrage, and
+save the changes before opening the risk report. The report includes a standalone HTML download
+and a print action which opens the browser's Save as PDF dialog.
+
+The same upload form accepts GAEB X83 (3.1 or 3.2). It shows normalized positions, structural
+findings and price-check coverage and exports the shared HTML report. GAEB 90, DOCX and XLSX
+are currently unsupported.
+
+To make local Ollama available for PDF uploads, start the server with:
+
+```powershell
+uv run python -m boqcheck.web --endpoint http://127.0.0.1:44445/api/chat --model bonsai-2:27b --timeout 180
+```
+
+Select the model checkbox on a PDF upload to use it for that run. Without the checkbox the
+existing rules run on their own. The report records model coverage or unavailability.
+The web server defaults to six model comparisons per upload (override with `--max-requests`).
+Add `--spelling` to the web or PDF CLI command to check German spelling within the same model
+budget. To recognize additional trade terms and brands, add `--lexicon PATH` with a UTF-8 list
+containing one accepted word per line. A proposal appears only if its original token is found in
+the cited source and a nearby replacement is supported by the local dictionary or lexicon.
+The reviewer can edit the replacement before exporting the risk report. The source PDF text
+remains intact.
+
+Review state and generated files are available for the lifetime of the local server. Download
+the report, annotated PDF or log before stopping it. To retain a confirmed PDF rule case,
+select its history checkbox and enter a reviewer identifier before saving. Confirmed cases
+promoted this way persist in `bidguard-history.sqlite3` (override with `--history-db PATH`).
+The next upload reports coverage for saved drawing-scope and aggregate-limit rules.
+Enter the trade on upload to restrict historical matches to cases tagged with that trade and
+untagged cases. With the field blank, all saved rules are considered. Position cues are checked
+against extracted PDF text, and the report explains skipped or inconclusive historical rules.
+To promote a confirmed model finding, also enter a reusable conflict condition and comma-separated
+search phrases. On a new PDF upload with the model enabled, historical conditions use up to half
+the comparison budget (rounded up). A replay finding must cite excerpts from the new PDF.
+The report shows conditions that were deferred when the budget ran out.
+Save any edits and choose **Historische Prüfung fortsetzen** to run the next batch. Deferred
+reviews retain the original PDF, completed comparisons, edits and latest exports in SQLite.
+Keep the private review URL to reopen it after restarting the server with the same history
+database and model. The database contains those documents and should stay local.
+
+### Command-line review
+
 ```powershell
 uv sync --locked
 uv run python -m boqcheck.review_pdf "data/raw/LV_09_Porenbetondach.pdf" "runs/roof-review"
@@ -46,6 +101,19 @@ reserves up to half the requests for those pairs. It spreads the remaining local
 the document when the budget cannot cover every window.
 The log reports completed comparisons and which physical PDF pages supplied all, some, or none
 of their extracted lines. It preserves deterministic findings when the model is unavailable.
+
+## GAEB X83 validation
+
+```powershell
+uv run python -m boqcheck.gaeb_checks "data/raw/GAEB-[PROJEKT_004].X83"
+```
+
+The JSON report lists importer warnings and position findings with their OZ and item number.
+An X83 without prices is valid for this check. If a file explicitly supplies `UP`, `PriceBasis`
+and `IT` as item extensions, the checker compares the rounded total for standard unit-priced
+items with a known quantity and unit. It skips totals with missing operands or explicit discounts.
+The official X83 and X84 schemas are available from
+[GAEB](https://www.gaeb.de/de/service/downloads/gaeb-datenaustausch/).
 
 ## Challenge
 
