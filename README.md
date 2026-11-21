@@ -10,6 +10,43 @@ finds errors and risks in them and gives the estimator a risk report before the 
 BoQ data model. Checks, the risk report and the upload page do not exist yet.
 [AGENTS.md](AGENTS.md) has the commands and the rules for coding agents.
 
+## Local PDF contradiction review
+
+```powershell
+uv sync --locked
+uv run python -m boqcheck.review_pdf "data/raw/LV_09_Porenbetondach.pdf" "runs/roof-review"
+```
+
+Use a new output directory for each run. The command prints a JSON manifest with the status,
+candidate count, coverage warnings and paths to the annotated source PDF and Markdown log.
+Agent integrations can call `boqcheck.review_pdf.review_pdf(filename, pdf_bytes, output)` directly.
+
+The baseline checks forward references in drawing positions and differing maximum aggregate
+sizes for Schachtvierungen. Review the resulting candidates before using the proposed
+Bieterfragen. Textless pages are reported as skipped. See the
+[PDF review architecture](docs/pdf-contradiction-review.md) for the data flow and the
+[PDF review checklist](docs/pdf-review-checklist.md) for completed checks and open work.
+
+
+### Semantic review with Ollama
+
+```powershell
+uv run python -m boqcheck.review_pdf "input.pdf" "runs/model-review" `
+  --endpoint http://127.0.0.1:44445/api/chat --model "bonsai-2:27b" --timeout 180
+```
+
+Agent callers can pass `semantic=SemanticConfig(endpoint, model)` to `review_pdf`.
+The tool submits text excerpts to the configured loopback model. The native Ollama endpoint
+uses JSON output with thinking disabled. Existing OpenAI-compatible loopback chat URLs are also
+supported.
+
+The comparison budget defaults to 24 requests and can be adjusted with `--max-requests`.
+When related windows share uncommon terms, an OZ or an explicit reference to an OZ, the tool
+reserves up to half the requests for those pairs. It spreads the remaining local checks across
+the document when the budget cannot cover every window.
+The log reports completed comparisons and which physical PDF pages supplied all, some, or none
+of their extracted lines. It preserves deterministic findings when the model is unavailable.
+
 ## Challenge
 
 **Problem.** Bills of quantities often contain thousands of line items, multiple cost groups and
