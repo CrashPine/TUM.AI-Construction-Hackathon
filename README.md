@@ -34,7 +34,9 @@ findings and price-check coverage and exports the shared HTML report. GAEB 90 up
 the uploaded file. A price-only D84 displays the supplied prices and reports missing
 quantities. An optional DOCX attachment belongs to the uploaded LV. Open its source list,
 select a paragraph or table cell for a finding, and save the review to include that excerpt
-in the HTML report. Selection is manual. XLSX import remains open.
+in the HTML report. For PDFs, an attached DOCX also supports automatic comparison of explicitly labelled fields.
+Use the same OZ and component title, followed by a property such as a thickness in the next
+paragraph. The web review and HTML export show the matched sources. Other excerpts can be cited manually. XLSX import remains open.
 
 To make local Ollama available for PDF uploads, start the server with:
 
