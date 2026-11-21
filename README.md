@@ -6,8 +6,9 @@ Construction Hackathon.
 We build a prototype that reads long bills of quantities (BoQs; German *Leistungsverzeichnis*, LV),
 finds errors and risks in them and gives the estimator a risk report before the bid.
 
-**Status (2026-11-21):** no code yet, and the tech stack is not chosen. The repository holds the
-challenge brief, the sample data and the instructions for coding agents ([AGENTS.md](AGENTS.md)).
+**Status (2026-11-21):** the Python package `boqcheck` reads GAEB DA XML files (`.X83`) into a
+BoQ data model. Checks, the risk report and the upload page do not exist yet.
+[AGENTS.md](AGENTS.md) has the commands and the rules for coding agents.
 
 ## Challenge
 
@@ -61,6 +62,9 @@ of these as separate files.
 | `README.md` | this overview |
 | `data/README.md` | data inventory |
 | `data/raw/` | the organizers' files, read-only |
+| `src/boqcheck/` | Python package: BoQ data model and parsers |
+| `tests/` | pytest tests |
+| `pyproject.toml`, `uv.lock` | project settings and locked dev tool versions |
 
 ## How we work
 
