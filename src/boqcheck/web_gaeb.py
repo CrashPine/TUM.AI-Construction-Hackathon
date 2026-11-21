@@ -1,6 +1,8 @@
 """Adapt the GAEB checker result to the shared web review contract."""
 
 from . import parse
+from .calculation import check_calculations
+from .gaeb90 import parse_gaeb90
 from .gaeb_checks import check_boq
 
 _TITLES = {
@@ -79,4 +81,72 @@ def review_x83(name: str, data: bytes) -> dict:
         "warnings": report["warnings"],
         "gaeb": report,
         "positions": boq.items,
+    }
+
+
+def review_legacy(name: str, data: bytes) -> dict:
+    """Review one GAEB 90 exchange file and retain the actual record for each price.
+
+    :param name: uploaded filename with phase suffix.
+    :param data: original file bytes.
+    :returns: shared review result with physical line numbers and source records.
+    :raises ValueError: when the phase marker and extension differ.
+    """
+    records = {}
+    boq = parse_gaeb90(data, name, records=records)
+    if boq.phase != name[-2:]:
+        raise ValueError("Dateiendung und Austauschphase in Satz 00 stimmen nicht überein.")
+    priced = [item for item in boq.items if item.total is not None or item.unit_price is not None]
+    issues = check_calculations(boq)
+    skipped = sum(issue.kind == "line" and issue.status == "inconclusive" for issue in issues)
+    warnings = []
+    if skipped:
+        warnings.append(f"{skipped} Positionsbeträge ohne vergleichbare Menge oder Preisangaben.")
+    open_sums = sum(issue.kind != "line" and issue.status == "inconclusive" for issue in issues)
+    if open_sums:
+        warnings.append(f"{open_sums} ausgewiesene Summen sind nicht prüfbar.")
+    findings = []
+    for issue in issues:
+        if issue.status != "mismatch":
+            continue
+        kind = {"line": "23", "section": "32", "total": "99"}[issue.kind]
+        keys = [("21", issue.oz), (kind, issue.oz)] if issue.kind == "line" else [(kind, issue.oz)]
+        sources = [
+            {
+                "record": i,
+                "reference": f"Zeile {i} · Satz {code} · {oz or 'Gesamtsumme'}",
+                "excerpt": raw,
+            }
+            for code, oz in keys
+            for i, raw in records.get((code, oz), [])
+        ]
+        findings.append(
+            {
+                "id": f"BG-{len(findings) + 1:03d}",
+                "assessment": "Rechenabweichung",
+                "category": "Preisprüfung",
+                "method": "GAEB-90-Preisprüfung",
+                "evidence": "Ausgewiesene Werte aus der hochgeladenen Datei",
+                "impact": "Die Abweichung kann die Angebotssumme ändern.",
+                "explanation": issue.explanation,
+                "question": "Welcher Betrag ist anzusetzen?",
+                "sources": sources,
+            }
+        )
+    return {
+        "positions": boq.items,
+        "findings": findings,
+        "warnings": warnings,
+        "gaeb": {
+            "version": "90",
+            "phase": boq.phase,
+            "items": len(boq.items),
+            "arithmetic_checked": len(priced) - skipped,
+            "arithmetic_skipped": skipped,
+        },
+        "records": sorted(
+            (i, f"Satz {code} · {oz or 'Gesamtsumme'}", raw)
+            for (code, oz), lines in records.items()
+            for i, raw in lines
+        ),
     }

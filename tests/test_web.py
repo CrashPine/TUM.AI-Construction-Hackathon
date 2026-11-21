@@ -1,6 +1,7 @@
 """Verify PDF and GAEB uploads through the local web workflow without a model."""
 
 import json
+import re
 from collections.abc import Callable
 from contextlib import closing
 from io import BytesIO
@@ -81,6 +82,71 @@ def test_upload_review_and_report(tmp_path: Path) -> None:
         page_one = document[0]
         assert sum(a.type[1] == "Highlight" for a in page_one.annots()) == 2
     assert b"BG-001" in _request(app, run + "/log")[2]
+
+
+@pytest.mark.parametrize(
+    ("name", "count", "checked"),
+    [
+        ("Angebot AN24-0305.D84", 274, 274),
+        ("StBALV23040.D84", 249, 0),
+        ("8209.003_Leistungsverzeichnis_leer.D83", 159, 0),
+        ("StBALV23040.D86", 249, 249),
+        ("[ORT_024] LV24069.D86", 197, 197),
+    ],
+)
+def test_legacy_upload(tmp_path: Path, name: str, count: int, checked: int) -> None:
+    """Upload each real legacy fixture, open source records and export the review.
+
+    :param tmp_path: isolated web storage.
+    :param name: fixture name.
+    :param count: expected positions.
+    :param checked: comparable line amounts.
+    """
+    app = make_app(tmp_path)
+    data = _ROOF.with_name(name).read_bytes()
+    status, headers, _ = _request(
+        app, "/upload?" + urlencode({"name": name.lower()}), data, "application/octet-stream"
+    )
+    assert status.startswith("303")
+    run = headers["Location"]
+    page = _request(app, run)[2].decode()
+    assert f"GAEB 90 · Phase {name[-2:]} · {count} Positionen" in page
+    assert f"Preisprüfung: {checked} Gesamtbeträge geprüft" in page and 'id="record-' in page
+    report = _request(app, run + "/report?download=1")[2].decode()
+    if name.endswith("D83"):
+        assert "Für D83 ist das zulässig" in report and "Keine aktiven Befunde" in report
+    if name == "StBALV23040.D84":
+        assert "249 übersprungen" in report
+
+
+def test_legacy_price_evidence(tmp_path: Path) -> None:
+    """Check that an altered D84 price leads to the original record and editable report.
+
+    :param tmp_path: isolated web storage.
+    """
+    app = make_app(tmp_path)
+    name = "Angebot AN24-0305.D84"
+    rows = _ROOF.with_name(name).read_bytes().splitlines()
+    index = next(i for i, row in enumerate(rows) if row.startswith(b"23"))
+    rows[index] = rows[index][:24] + b"000007200001" + rows[index][36:]
+    data = b"\r\n".join(rows) + b"\r\n"
+    status, headers, _ = _request(app, "/upload?name=test.D84", data, "application/octet-stream")
+    assert status.startswith("303")
+    run = headers["Location"]
+    page = _request(app, run)[2].decode()
+    assert f'href="#record-{index + 1}"' in page
+    form = dict.fromkeys(re.findall(r'name="(status-BG-\d+)"', page), "open")
+    form.update({"status-BG-001": "confirmed", "question-BG-001": "Bitte Preis klären."})
+    fields = urlencode(form)
+    assert _request(app, run, fields.encode(), "application/x-www-form-urlencoded")[0].startswith(
+        "303"
+    )
+    report = _request(app, run + "/report?download=1")[2].decode()
+    assert "72000.01" in report and "Bitte Preis klären." in report
+    assert rows[index].decode("ascii") in report
+    assert _request(app, "/upload?name=test.D83", data, "application/octet-stream")[0].startswith(
+        "400"
+    )
 
 
 def test_invalid_upload_returns_error(tmp_path: Path) -> None:

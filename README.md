@@ -29,8 +29,10 @@ save the changes before opening the risk report. The report includes a standalon
 and a print action which opens the browser's Save as PDF dialog.
 
 The same upload form accepts GAEB X83 (3.1 or 3.2). It shows normalized positions, structural
-findings and price-check coverage and exports the shared HTML report. GAEB 90, DOCX and XLSX
-are currently unsupported.
+findings and price-check coverage and exports the shared HTML report. GAEB 90 uploads
+(D83, D84 and D86) use the same review and export. Price findings cite physical lines in
+the uploaded file. A price-only D84 displays the supplied prices and reports missing
+quantities. DOCX and XLSX imports remain open.
 
 To make local Ollama available for PDF uploads, start the server with:
 

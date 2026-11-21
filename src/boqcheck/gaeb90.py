@@ -19,7 +19,7 @@ class _Draft:
     """An item while its records are read."""
 
     oz: str
-    quantity: Decimal
+    quantity: Decimal | None
     unit: str
     short: list[str] = field(default_factory=list)
     long: list[str] = field(default_factory=list)
@@ -27,7 +27,7 @@ class _Draft:
     total: Decimal | None = None
 
 
-def parse_gaeb90(data: bytes, source: str) -> BoQ:
+def parse_gaeb90(data: bytes, source: str, *, records: dict | None = None) -> BoQ:
     """Parse a GAEB 90 bill of quantities.
 
     Sections come from the 11/12 records; a file without them gets a section, with an empty
@@ -35,6 +35,7 @@ def parse_gaeb90(data: bytes, source: str) -> BoQ:
 
     :param data: the file content.
     :param source: the file name, for the result and for error messages.
+    :param records: optional evidence index for position, price and total records.
     :returns: the BoQ with its sections and items in document order.
     :raises ValueError: if the file has no 00 record or no valid OZ mask in it, if a 23 record
         does not follow the 21 record of its item, or if the file has no 21 record.
@@ -52,8 +53,12 @@ def parse_gaeb90(data: bytes, source: str) -> BoQ:
     drafts: list[_Draft] = []
     grand = None
     oz = ""
-    for line in lines:
+    prices_only = header[10:12] == "84" and not any(line.startswith("21") for line in lines)
+    for number, line in enumerate(lines, 1):
         kind = line[:2]
+        if records is not None and kind in ("21", "23", "32", "99"):
+            key = (kind, "" if kind == "99" else _oz(line[2:11], widths))
+            records.setdefault(key, []).append((number, line))
         if kind == "11":
             oz = _oz(line[2:11], widths)
         elif kind == "12":
@@ -63,12 +68,16 @@ def parse_gaeb90(data: bytes, source: str) -> BoQ:
                 _Draft(_oz(line[2:11], widths), _number(line[23:34], 3), line[34:38].strip())
             )
         elif kind == "23":
+            if prices_only:
+                drafts.append(_Draft(_oz(line[2:11], widths), None, ""))
             if not drafts or drafts[-1].oz != _oz(line[2:11], widths):
                 raise ValueError(f"{source}: 23 record {line[2:11]!r} without its 21 record")
             # The unit price has 3 decimals in 11 digits, or 2 in 10 digits and a blank.
             price = line[12:23]
-            drafts[-1].unit_price = _number(price, 2 if price.endswith(" ") else 3)
-            drafts[-1].total = _number(line[24:36], 2)
+            drafts[-1].unit_price = (
+                _number(price, 2 if price.endswith(" ") else 3) if price.strip() else None
+            )
+            drafts[-1].total = _number(line[24:36], 2) if line[24:36].strip() else None
         elif kind == "25" and drafts:
             drafts[-1].short.append(line[2:74].rstrip())
         elif kind == "26" and drafts:
@@ -135,5 +144,8 @@ def _number(digits: str, decimals: int) -> Decimal:
     :param digits: the digits of the field.
     :param decimals: the number of implied decimal places.
     :returns: the number.
+    :raises ValueError: if the field does not contain a signed or unsigned integer.
     """
+    if not re.fullmatch(r"[+-]?[0-9]+", digits.strip()):
+        raise ValueError("Ungültiges Zahlenfeld im GAEB-90-Datensatz.")
     return Decimal(digits.strip()).scaleb(-decimals)
