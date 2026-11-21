@@ -237,7 +237,11 @@ Pass `scale` and `scale_unit` for quantity comparisons, and `currency`,
 `price_type`, `market`, and `price_period` for price comparisons. Peer rows
 also supply `quantity`, `price` and `price_basis` as applicable. The current
 quantity, price and price basis come from the XLSX. Quantities are compared
-per `scale` and `scale_unit`, prices per `price_basis`. A reference range needs
+per `scale` and `scale_unit`, prices per `price_basis`. Prices are compared only
+with peers of the same trade, scope, unit, currency, `price_type`, market and
+`price_period`; they are never indexed or adjusted to another date, and the report
+says that the reference is not a market quote. Without a current price or price
+basis the price comparison is unavailable. A reference range needs
 at least `min_projects` distinct comparable projects (integer of at least 2,
 default 3); with fewer the report shows insufficient evidence. A value is
 flagged as unusual when it lies outside the peer range and deviates from the

@@ -1007,6 +1007,7 @@ def test_historical_comparison_export(tmp_path: Path) -> None:
         report = _request(app, headers["Location"] + "/report?download=1")[2].decode()
         assert "history-1.xlsx · Blatt Sheet 1 · Zeile 2" in report
         assert ("Synthetische Beispieldaten" in report) is not insufficient
+        assert "keine Index- oder Datumsanpassung. Kein Marktpreisangebot." in report
         if insufficient:
             assert report.count("Zu wenige Vergleichsprojekte") == 1
             assert "Vergleichsprojekte: 2 (mindestens 3)" in report

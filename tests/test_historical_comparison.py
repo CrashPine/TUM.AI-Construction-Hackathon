@@ -87,6 +87,44 @@ def test_missing_fields_and_exclusions() -> None:
     assert "excluded" not in compare_history(current, peers)["quantity"]
 
 
+def test_price_compatibility() -> None:
+    """Normalize prices per basis and exclude peers that differ in any one price field."""
+    current = HistoricalPosition(
+        "current", "OZ 1", "roof", "deck", "m2", price=D("1500"), price_basis=D("100"),
+        currency="EUR", price_type="net", market="demo market", price_period="2026-Q4",
+    )  # fmt: skip
+    peers = [
+        replace(current, project="per-m2", source="OZ 1", price=D("12"), price_basis=D("1")),
+        replace(current, project="per-10", source="OZ 2", price=D("140"), price_basis=D("10")),
+        replace(current, project="per-100", source="OZ 3", price=D("1600")),
+    ]
+    normal = compare_history(current, peers)["unit_price"]
+    assert normal["status"] == "within_reference"
+    assert (normal["median"], normal["low"], normal["high"]) == (D("14"), D("12"), D("16"))
+    assert [peer["sources"] for peer in normal["peers"]] == [
+        [("OZ 2", D("14"))],
+        [("OZ 3", D("16"))],
+        [("OZ 1", D("12"))],
+    ]
+    assert compare_history(replace(current, price=D("3000")), peers)["unit_price"]["status"] == (
+        "anomaly"
+    )
+    for field, value in (
+        ("trade", "facade"),
+        ("scope", "insulation"),
+        ("unit", "m"),
+        ("currency", "CHF"),
+        ("price_type", "gross"),
+        ("market", "other market"),
+        ("price_period", "2020-Q1"),
+    ):
+        changed = [*peers[:2], replace(peers[2], **{field: value})]
+        result = compare_history(current, changed)["unit_price"]
+        assert result["status"] == "insufficient_evidence", field
+        assert result["excluded"] == {"different_basis": 1}, field
+    assert compare_history(current, [])["unit_price"]["status"] == "insufficient_evidence"
+
+
 def _dataset(tmp_path: Path, **changes: object) -> Path:
     r"""Write a minimal dataset manifest.
 

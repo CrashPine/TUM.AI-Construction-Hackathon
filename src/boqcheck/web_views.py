@@ -319,6 +319,10 @@ def _history_comparison(result: dict, report: bool) -> str:
     parts = ["<h2>Historischer Mengen- und Preisvergleich</h2>"]
     if result["synthetic_history"]:
         parts.append("<p>Synthetische Beispieldaten. Keine Marktpreise.</p>")
+    parts.append(
+        "<p>Preise nur bei gleicher Währung, Netto/Brutto-Angabe, Markt und Preisstand "
+        "verglichen; keine Index- oder Datumsanpassung. Kein Marktpreisangebot.</p>"
+    )
     if result.get("history_authorization"):
         parts.append(
             "<p>Nutzungsfreigabe laut Datensatz, nicht geprüft: "
