@@ -72,5 +72,6 @@ verification.
 - [x] Label unsupported upload formats in the UI until their adapters pass fixture checks.
 - [x] Calculate historical quantity and price anomalies from explicit comparison metadata and sourced peers. Verified both on synthetic data.
 - [x] Load a mapped local historical dataset and export quantity and price findings, peer sources and insufficient-evidence coverage. Verified on synthetic XLSX.
-- [ ] Add automated historical ingestion and local embedding retrieval.
+- [x] Optionally filter metadata-compatible positions by local Ollama embeddings. Verified with synthetic vectors and an unavailable service.
+- [ ] Add automated historical ingestion, project-level shortlisting and evaluate retrieval on real comparable projects.
 - [ ] Add the separate legal retrieval demo after the core workflow.
