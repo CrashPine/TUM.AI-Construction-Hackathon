@@ -995,18 +995,22 @@ def test_historical_comparison_export(tmp_path: Path) -> None:
     for insufficient in (False, True):
         if insufficient:
             dataset["projects"].pop()
+            dataset["peers"] = [dict(metadata, quantity=100, price=1000)]
+            dataset["current"]["01"]["currency"] = ""
+            dataset.update(synthetic=False, authorization="Lizenz <7>")
             path.write_text(json.dumps(dataset), "utf8")
         app = make_app(tmp_path, dataset=load_dataset(path))
         _, headers, _ = _request(
             app, "/upload?name=demo.xlsx", workbook, "application/octet-stream"
         )
         report = _request(app, headers["Location"] + "/report?download=1")[2].decode()
-        assert (
-            "Synthetische Beispieldaten" in report
-            and "history-1.xlsx · Blatt Sheet 1 · Zeile 2" in report
-        )
+        assert "history-1.xlsx · Blatt Sheet 1 · Zeile 2" in report
+        assert ("Synthetische Beispieldaten" in report) is not insufficient
         if insufficient:
-            assert report.count("Zu wenige Vergleichsprojekte") == 2
+            assert report.count("Zu wenige Vergleichsprojekte") == 1
+            assert "Fehlende Angaben: Währung" in report
+            assert "Ausgeschlossen (Vergleichsstufe): 1 gleiches Projekt" in report
+            assert "Nutzungsfreigabe laut Datensatz, nicht geprüft: Lizenz &lt;7&gt;" in report
         else:
             assert report.count("Auffällig") == 2 and "Median:" in report
     _, headers, _ = _request(
