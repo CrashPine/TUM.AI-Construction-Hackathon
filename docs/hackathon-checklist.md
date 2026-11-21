@@ -45,7 +45,8 @@ verification.
 - [x] Flag explicitly open PDF specifications and compensation terms with source evidence,
   pricing impact and a German Bieterfrage. Check matching adjacent positions and applicable
   general clauses. Verify that included work does not become a missing-scope finding.
-- [ ] Extend scope review to ambiguous free text and supporting documents once those are imported.
+- [x] Compare labelled PDF and DOCX specifications with matching OZ and component title. Verify clarification, discrepancy, equivalent units and a different component in the HTML report.
+- [ ] Extend attachment analysis to ambiguous free text, additional layouts and GAEB source positions.
 - [x] Check proposed German PDF typos against the local dictionary and project lexicon.
   Validate the exact source token, retain the original, and export reviewer edits in the report.
 - [ ] Add optional token-only online attestation and provenance caching for unresolved words.

@@ -187,6 +187,8 @@ def _finding(base: str, finding: dict, report: bool, history: bool) -> str:
             ref = f'<a href="#position-{source["position"]}">{ref}</a>'
         elif not report and "record" in source:
             ref = f'<a href="#record-{source["record"]}">{ref}</a>'
+        elif not report and "docx" in source:
+            ref = f'<a href="#docx-{escape(source["docx"])}">{ref}</a>'
         elif not report:
             ref = (
                 f'<a href="{base}/pdf#page={source["page"]}" target="_blank" rel="noopener">'
@@ -366,6 +368,11 @@ def review_view(
     if findings and not report:
         content.append(f'<form method="post" action="{base}">')
     attachment = result.get("attachment")
+    if attachment and "attachment_checked" in result:
+        content.append(
+            f"<p>Automatischer Abgleich LV / DOCX: {result['attachment_checked']} "
+            "eindeutig zugeordnete Positionsangaben geprüft.</p>"
+        )
     entries = {entry["id"]: entry for entry in attachment["entries"]} if attachment else {}
     if attachment and not report:
         content.append(
