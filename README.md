@@ -95,6 +95,12 @@ Bieterfragen. Textless pages are reported as skipped. See the
 [PDF review architecture](docs/pdf-contradiction-review.md) for the data flow and the
 [PDF review checklist](docs/pdf-review-checklist.md) for completed checks and open work.
 
+`tests/test_baseline.py` freezes the rule findings for all 43 supported sample files and checks
+that an unavailable or malformed model keeps them and the export. To rerun the roof and shaft
+cases with a real local model, set `BOQCHECK_BASELINE_ENDPOINT` and `BOQCHECK_BASELINE_MODEL`,
+then run `uv run pytest -s tests/test_baseline.py -k local_model`. That tier prints the model
+findings for comparison; it does not score them.
+
 
 ### Semantic review with Ollama
 
