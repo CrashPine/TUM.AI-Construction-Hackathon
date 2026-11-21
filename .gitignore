@@ -1,0 +1,4 @@
+# Local secrets such as API keys. Commit a .env.example without values instead.
+.env
+.env.*
+!.env.example

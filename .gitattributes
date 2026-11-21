@@ -1,0 +1,3 @@
+# Keep the organizers' files byte-exact: GAEB 90 files are fixed-width
+# 80-column text with CRLF line ends, which line-end conversion would change.
+data/raw/** -text

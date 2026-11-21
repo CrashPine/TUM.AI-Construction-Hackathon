@@ -1,0 +1,99 @@
+# AI Estimation and Bidding Assistant for Bills of Quantities
+
+Team repository for **Challenge A: AI-Powered Cost Estimation and BoQ Analysis** at the TUM.AI
+Construction Hackathon.
+
+We build a prototype that reads long bills of quantities (BoQs; German *Leistungsverzeichnis*, LV),
+finds errors and risks in them and gives the estimator a risk report before the bid.
+
+**Status (2026-11-21):** no code yet, and the tech stack is not chosen. The repository holds the
+challenge brief, the sample data and the instructions for coding agents ([AGENTS.md](AGENTS.md)).
+
+## Challenge
+
+**Problem.** Bills of quantities often contain thousands of line items, multiple cost groups and
+cross-trade dependencies. Companies lack the time and staff to review them in detail, identify risks
+and learn from past projects. Typos, calculation errors and overlooked change-order potential can
+have major financial consequences.
+
+**Objective.** A prototype for intelligent BoQ analysis:
+
+- Import and parse long BoQs (PDF, GAEB, Excel).
+- **Error detection (priority):** missing items, unclear descriptions, contradictions, typos.
+- Risk assessment: flag imprecise scope descriptions and unusual quantities.
+- Detect change-order potential and likely disputes during execution.
+- Optional: suggest unit prices or markups from historical project data.
+
+**Milestones:**
+
+1. BoQ parsing and structured data extraction
+2. Error detection and plausibility checks
+3. Risk scoring and change-order detection
+4. Integration of historical project data (optional)
+5. What-if analyses (material prices, alternatives)
+
+**Deliverables:**
+
+- A demo of a web app or assistant tool with upload and risk report.
+- A pitch from an estimator's perspective: how does the prototype change the bidding process?
+
+## Data
+
+[`data/raw/`](data/raw/) holds the 44 files that the organizers shared (25 MB, German, anonymized),
+unchanged. [`data/README.md`](data/README.md) describes each file and which files hold the same BoQ.
+
+| Format | Files | Content |
+|---|---:|---|
+| GAEB DA XML (`.X83`) | 4 | bid requests (phase 83): sections, items, quantities, units, short and long texts; no prices |
+| GAEB 90 (`.D83`, `.D84`, `.D86`) | 5 | fixed-width BoQ files: 1 bid request (83), 2 bids (84), 2 contract awards (86); the 84 and 86 files have prices |
+| PDF | 34 | 27 trade BoQs of one building project (`LV_00` to `LV_23`), 2 BoQs with prices, 5 other BoQs and tender packages without prices |
+| DOCX | 1 | 40 BoQ positions grouped by work package |
+
+The brief also names Excel BoQs, historical project data (planned vs. actual costs, change orders),
+unit price catalogs and real examples of faulty BoQ items. On 2026-11-21 the shared folder had none
+of these as separate files.
+
+## Repository layout
+
+| Path | Content |
+|---|---|
+| `AGENTS.md` | instructions for coding agents: rules and notes on the file formats |
+| `README.md` | this overview |
+| `data/README.md` | data inventory |
+| `data/raw/` | the organizers' files, read-only |
+
+## How we work
+
+- Branch from `main` (`feature/`, `fix/`, `docs/`, `chore/`, `data/`) and open a pull request.
+- Keep pull requests small (about 400 changed lines). Commit each finished functionality with its tests.
+- The repository is public. Never commit API keys, tokens or `.env` files.
+
+[AGENTS.md](AGENTS.md) has the full rules.
+
+## Glossary
+
+Short explanations from general domain knowledge, not checked against a source. Check a term
+before you build an error rule on it. Only the phase meanings were compared with the data.
+
+| German term | Meaning |
+|---|---|
+| LV, Leistungsverzeichnis | bill of quantities (BoQ) |
+| OZ, Ordnungszahl | item number, hierarchical (for example `01.02.0030`) |
+| Los, Titel, Bereich | levels of the BoQ structure; a Los (lot) can be awarded on its own |
+| Position | line item |
+| Kurztext, Langtext | short description, full description |
+| Menge, ME (Mengeneinheit) | quantity, unit: `m`, `m²`, `m³`, `St` (piece), `psch` (lump sum), `Mt` (month) |
+| EP (Einheitspreis), GP (Gesamtpreis, Gesamtbetrag) | unit price, line total: GP = Menge × EP |
+| Pauschal (psch) | lump sum |
+| Bedarfsposition, Eventualposition | provisional item: paid only if the client orders it |
+| Wahlposition, Alternativposition | alternative item: priced instead of a base item (Grundposition) |
+| Zulage | surcharge item on top of another item |
+| Vorbemerkungen | preliminary notes that apply to many items |
+| Nachtrag | change order: extra payment for changed or additional work |
+| Aufmaß | measurement of the work done |
+| Anfrage, Angebot, Auftrag | request for bids, bid, contract award |
+| VOB/A, VOB/B, VOB/C | German construction rules: award procedure, contract terms, technical standards (ATV, DIN 18299 ff.) |
+| VHB Bayern | standard tender forms of Bavarian public construction; forms 211 and 214.H appear in two PDFs |
+| STLB-Bau | standard text library for BoQ items |
+| GAEB | German standard for BoQ data exchange; formats include GAEB 90 (fixed-width text) and GAEB DA XML |
+| Phase 83, 84, 86 | GAEB exchange phase: bid request, bid, contract award |
