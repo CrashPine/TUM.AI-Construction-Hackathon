@@ -2,11 +2,13 @@
 
 import ipaddress
 import json
-from collections import Counter
+import re
+from collections import Counter, defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
 from email.message import Message
-from itertools import groupby
+from heapq import nlargest
+from itertools import combinations, groupby
 from typing import BinaryIO
 from urllib.error import URLError
 from urllib.parse import urlsplit
@@ -88,26 +90,75 @@ def _windows(sources: dict[str, Line]) -> list[list[str]]:
     return windows
 
 
-def _comparisons(windows: list[list[str]], budget: int) -> Iterator[tuple[list[str], list[str]]]:
-    """Spread local checks across the document if the budget cannot cover every window.
+def _related_pairs(
+    windows: list[list[str]], sources: dict[str, Line], limit: int
+) -> list[tuple[int, int]]:
+    """Rank cross-window pairs by shared uncommon terms, OZ and explicit OZ references.
 
     :param windows: consecutive document windows.
+    :param sources: source lines indexed by immutable ID.
+    :param limit: maximum number of pairs to return.
+    :returns: window index pairs in priority order.
+    """
+    postings: dict[str, set[int]] = defaultdict(set)
+    indexed: set[str] = set()
+    for index, window in enumerate(windows):
+        for key in window:
+            if key in indexed:
+                continue
+            indexed.add(key)
+            line = sources[key]
+            for word in re.findall(r"[^\W\d_]{6,}", line.text.casefold()):
+                postings[word].add(index)
+            positions = re.findall(r"\b\d+(?:\.\d+){2,}[a-z]?\b", line.text.casefold())
+            if line.oz:
+                positions.append(line.oz.casefold())
+            for position in positions:
+                postings[position].add(index)
+
+    scores: Counter[tuple[int, int]] = Counter()
+    frequency_ceiling = min(8, max(2, len(windows) // 3))
+    for term, indices in postings.items():
+        if 2 <= len(indices) <= frequency_ceiling:
+            weight = 12 if term[0].isdigit() else 1
+            for pair in combinations(sorted(indices), 2):
+                scores[pair] += weight
+    return nlargest(
+        limit, scores, key=lambda pair: (scores[pair], pair[1] - pair[0], -pair[0], -pair[1])
+    )
+
+
+def _comparisons(
+    windows: list[list[str]], sources: dict[str, Line], budget: int
+) -> Iterator[tuple[list[str], list[str]]]:
+    """Compare related windows early and spread local checks over the document.
+
+    :param windows: consecutive document windows.
+    :param sources: source lines indexed by immutable ID.
     :param budget: maximum number of requests available.
     :yields: window pairs, with an empty second window for local comparisons.
     """
     if budget <= 0:
         return
-    if budget < len(windows):
-        if budget == 1:
+    priority = _related_pairs(windows, sources, budget // 2) if budget >= 2 else []
+    for left, right in priority:
+        yield windows[left], windows[right]
+
+    local_budget = budget - len(priority)
+    if local_budget < len(windows):
+        if local_budget == 1:
             yield windows[len(windows) // 2], []
             return
-        for index in range(budget):
-            yield windows[index * (len(windows) - 1) // (budget - 1)], []
+        for index in range(local_budget):
+            yield windows[index * (len(windows) - 1) // (local_budget - 1)], []
         return
 
+    scheduled = set(priority)
     for distance in range(len(windows)):
         for index in range(len(windows) - distance):
-            yield windows[index], windows[index + distance] if distance else []
+            other = index + distance
+            if (index, other) not in scheduled:
+                yield windows[index], windows[other] if distance else []
 
 
 def _page_coverage(pages: list[list[Line]], sources: dict[str, Line], checked: set[str]) -> str:
@@ -209,7 +260,7 @@ def semantic_review(
     checked: set[str] = set()
     completed = rejected = 0
 
-    for index, (left, right) in enumerate(_comparisons(windows, config.max_requests)):
+    for index, (left, right) in enumerate(_comparisons(windows, sources, config.max_requests)):
         if index >= config.max_requests:
             break
         payload = {

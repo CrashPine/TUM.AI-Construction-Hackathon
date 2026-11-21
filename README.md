@@ -41,7 +41,9 @@ uses JSON output with thinking disabled. Existing OpenAI-compatible loopback cha
 supported.
 
 The comparison budget defaults to 24 requests and can be adjusted with `--max-requests`.
-If the budget cannot cover every text window, the tool samples windows across the document.
+When related windows share uncommon terms, an OZ or an explicit reference to an OZ, the tool
+reserves up to half the requests for those pairs. It spreads the remaining local checks across
+the document when the budget cannot cover every window.
 The log reports completed comparisons and which physical PDF pages supplied all, some, or none
 of their extracted lines. It preserves deterministic findings when the model is unavailable.
 

@@ -127,3 +127,61 @@ def test_limited_budget_spans_the_document(monkeypatch: pytest.MonkeyPatch) -> N
     assert "1 (alle Textzeilen übermittelt), 2 (teilweise abgedeckt)" in coverage
     assert "3 (ohne extrahierbaren Text), 4 (nicht abgedeckt)" in coverage
     assert "5 (alle Textzeilen übermittelt)" in coverage
+
+
+def test_related_distant_windows_are_compared_before_local_sampling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reserve a model call for related clauses on distant pages.
+
+    :param monkeypatch: fixture for replacing window boundaries and the inference call.
+    """
+    clauses = (
+        "Position 12.40.017: Hydraulic interlock X7 must stay ON.",
+        "Fencing shall be installed at the west gate.",
+        "External finishes are specified on the drawings.",
+        "See 12.40.017: Hydraulic interlock X7 must stay OFF.",
+    )
+    with pymupdf.open() as document:
+        for clause in clauses:
+            document.new_page().insert_text((72, 72), clause)
+        pages, _ = extract(document)
+
+    monkeypatch.setattr(semantic, "_windows", lambda _: [["L1"], ["L2"], ["L3"], ["L4"]])
+    calls = []
+
+    def model_response(config: semantic.SemanticConfig, payload: dict) -> list[dict]:
+        """Record the requested pages and return the grounded cross-page conflict.
+
+        :param config: requested model configuration.
+        :param payload: input lines sent for analysis.
+        :returns: candidate records for the related pair.
+        """
+        assert config.max_requests == 2
+        calls.append(
+            (
+                [line["page"] for line in payload["left"]],
+                [line["page"] for line in payload["right"]],
+            )
+        )
+        return (
+            [
+                {
+                    "left_id": "L1",
+                    "right_id": "L4",
+                    "left_quote": "stay ON",
+                    "right_quote": "stay OFF",
+                    "status": "conflict",
+                    "explanation": "Both clauses apply to the same interlock.",
+                }
+            ]
+            if payload["right"]
+            else []
+        )
+
+    monkeypatch.setattr(semantic, "_request", model_response)
+    config = semantic.SemanticConfig(_CONFIG.endpoint, "test", max_requests=2)
+    findings, _, coverage = semantic.semantic_review(pages, config)
+    assert calls == [([1], [4]), ([3], [])]
+    assert len(findings) == 1
+    assert coverage.startswith("2/10")
