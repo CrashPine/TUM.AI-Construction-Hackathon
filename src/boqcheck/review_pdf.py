@@ -158,7 +158,7 @@ def review_pdf(
             warnings.append("Historische Modellprüfung teilweise offen; siehe Regelstatus.")
         origins: dict[int, list[str]] = {}
         for pattern, candidate in pending:
-            if candidate.spelling:
+            if candidate.spelling or candidate.kind == "calculation":
                 findings.append(candidate)
                 continue
             left, right = candidate.passages
@@ -191,6 +191,9 @@ def review_pdf(
             if finding.spelling:
                 assessment = "Möglicher Schreibfehler"
                 method = "Modellvorschlag mit lokalem Wortabgleich"
+            if finding.kind == "calculation":
+                assessment = "Rechenabweichung"
+                method = "Modellformel mit lokaler Decimal-Prüfung"
             if id(finding) in origins:
                 method += " · Historischer Modell-Treffer"
             category, impact = {
@@ -214,6 +217,7 @@ def review_pdf(
                     "Rechtschreibung",
                     "Die Leistungsbeschreibung könnte missverständlich sein.",
                 ),
+                "calculation": ("Positionsbetrag", "Die Abweichung kann die Angebotssumme ändern."),
             }.get(finding.kind, ("Widerspruch", "Siehe Begründung des Modellvorschlags."))
             records.append(
                 {
@@ -246,6 +250,8 @@ def review_pdf(
                     ],
                 }
             )
+            if finding.kind == "calculation":
+                records[-1]["evidence"] = "Menge, Preisbasis, Einheitspreis und Gesamtbetrag belegt"
             if finding.spelling:
                 token, correction, start, end = finding.spelling
                 records[-1].update(

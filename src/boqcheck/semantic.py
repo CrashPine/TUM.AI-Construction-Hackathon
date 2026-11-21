@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from .contradictions import Finding
+from .pdf_calculation import evaluate_price, price_groups
 from .pdf_extract import Line
 from .spelling import spelling_validator
 
@@ -39,7 +40,11 @@ If check_spelling is true, you may also append German spelling proposals with fi
 kind="spelling", source_id, token, correction and explanation in German.
 Copy the exact original word and propose a correction only when the sentence supports it.
 Skip names, product brands, valid compounds and inflections, units, abbreviations, standards,
-hyphenated word breaks and obvious extraction artifacts. Do not suggest style changes."""
+hyphenated word breaks and obvious extraction artifacts. Do not suggest style changes.
+For each entry in price_fields, propose the line-price expression even if it looks correct.
+Return kind="calculation", target=<total token ID>, expr={"op":"div","args":[
+{"op":"mul","args":[<qty token ID>,<price token ID>]},<basis token ID>]}.
+Use the exact token IDs from that entry. Omit ambiguous relationships."""
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -266,6 +271,8 @@ def semantic_review(
     """
     sources = {f"L{i}": line for i, line in enumerate((line for p in pages for line in p), 1)}
     windows = _windows(sources)
+    prices = {} if condition else price_groups(sources)
+    verified_prices: set[str] = set()
     total = len(windows) * (len(windows) + 1) // 2
     findings = []
     warnings = []
@@ -297,6 +304,14 @@ def semantic_review(
         }
         if condition:
             payload["historical_condition"] = condition
+        visible = set(left + right)
+        offered = {
+            target: tokens
+            for target, (tokens, parts) in prices.items()
+            if target not in verified_prices and all(part[1] in visible for part in parts.values())
+        }
+        if offered:
+            payload["price_fields"] = list(offered.values())
         if spell is not None:
             payload["check_spelling"] = True
         try:
@@ -311,6 +326,15 @@ def semantic_review(
         for record in records:
             if not isinstance(record, dict):
                 rejected += 1
+                continue
+            if record.get("kind") == "calculation":
+                target = record.get("target")
+                if isinstance(target, str) and target in offered and target not in verified_prices:
+                    valid, finding = evaluate_price(prices[target], record.get("expr"))
+                    if valid:
+                        verified_prices.add(target)
+                        if finding:
+                            findings.append(finding)
                 continue
             if record.get("kind") == "spelling":
                 source_id = record.get("source_id")
@@ -367,6 +391,15 @@ def semantic_review(
     if completed < total:
         warnings.append(f"Semantische Abdeckung unvollständig: {completed}/{total} Vergleiche.")
     coverage = _page_coverage(pages, sources, checked)
+    if not condition:
+        stated = sum(
+            bool(re.match(r"^(?:GB|Gesamtbetrag)\s*:", line.text, re.I))
+            for line in sources.values()
+        )
+        coverage += (
+            f". PDF-Positionsrechnung: {len(verified_prices)}/{stated} beschriftete "
+            f"Gesamtbeträge geprüft, {stated - len(verified_prices)} offen"
+        )
     findings.extend(finding for finding in spelling.values() if finding is not None)
     if spell is not None:
         coverage += ". Rechtschreibung lokal abgeglichen"
