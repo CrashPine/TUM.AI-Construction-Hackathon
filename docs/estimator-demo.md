@@ -43,3 +43,21 @@ Limitations:
 - The annotated PDF and the Markdown findings log are written at review time and do not
   include later reviewer edits; the HTML report does.
 - The 91-page PDF review took about 1.3 s on one development machine; other machines differ.
+
+## Explicit what-if calculation
+
+A GAEB or XLSX review has a **Was-wäre-wenn-Rechnung** form. Choose a position, the
+field (Menge or EP) and a hypothetical value; an empty value removes the assumption.
+The review and the report then show the original and the hypothetical quantity, unit price
+and amount (Menge × EP, rounded half up to the cent), and the difference. The section is
+labelled as a hypothetical assumption with no source data and no market price. The stated
+total of the position is shown unchanged. The parsed positions, findings and the annotated
+PDF are not changed.
+
+Limitations:
+
+- One assumption per review. It is kept only in memory and is not saved to the history
+  database, so it is lost on a restart.
+- There is no calculation for lump-sum items (Pauschal), positions with an adjusted total
+  or a price basis other than 1; the section says why.
+- PDF reviews have no parsed positions and no what-if form.

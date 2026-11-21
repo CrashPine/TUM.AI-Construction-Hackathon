@@ -4,6 +4,7 @@ import json
 import re
 from collections.abc import Callable
 from contextlib import closing
+from decimal import Decimal
 from hashlib import sha256
 from html import escape
 from io import BytesIO
@@ -18,12 +19,14 @@ import pymupdf
 import pytest
 from openpyxl import Workbook
 
-from boqcheck import semantic
+from boqcheck import semantic, what_if
 from boqcheck.docx_context import read_context
 from boqcheck.history import initialize, promote, replay
 from boqcheck.history_report import load_dataset
+from boqcheck.model import Item
 from boqcheck.web import make_app
 from boqcheck.web_gaeb import review_legacy
+from boqcheck.web_views import what_if_section
 from boqcheck.xlsx_lv import read_xlsx
 
 _ROOF = Path(__file__).resolve().parents[1] / "data" / "raw" / "LV_09_Porenbetondach.pdf"
@@ -1140,3 +1143,133 @@ def test_long_pdf_reports_text_layer_and_price_coverage(tmp_path: Path) -> None:
         text = rendered.decode()
         assert "Textebene: 91 von 91 Seiten" in text
         assert "EP/GP-Tabellen: 248/248 erkannte Positionszeilen geprüft." in text
+
+
+def _what_if(app: Callable, run: str, **fields: str) -> tuple[str, dict[str, str], bytes]:
+    r"""Post one hypothetical assumption to a review.
+
+    :param app: WSGI application.
+    :param run: review URL.
+    :param \*\*fields: form fields of the assumption.
+    :returns: status, headers and body.
+    """
+    body = urlencode(fields).encode()
+    return _request(app, run + "/whatif", body, "application/x-www-form-urlencoded")
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "amount", "delta"),
+    [("quantity", "10", "7500.00", "2812.50"), ("unit_price", "800,5", "5003.13", "315.63")],
+)
+def test_what_if_shows_labelled_arithmetic_without_changing_source(
+    tmp_path: Path, field: str, value: str, amount: str, delta: str
+) -> None:
+    """Show one hypothetical change on screen and in every report while the source stays intact.
+
+    :param tmp_path: isolated web storage.
+    :param field: changed field.
+    :param value: hypothetical value as typed.
+    :param amount: expected hypothetical amount.
+    :param delta: expected arithmetic difference.
+    """
+    app = make_app(tmp_path)
+    data = _ROOF.with_name("Angebot AN24-0305.D84").read_bytes()
+    run = _request(app, "/upload?name=test.D84", data, "application/octet-stream")[1]["Location"]
+    before = _request(app, run)[2].decode()
+    status, headers, _ = _what_if(app, run, position="2", field=field, value=value)
+    assert status.startswith("303") and headers["Location"] == run
+    edit = urlencode({"reviewer": ""}).encode()
+    assert _request(app, run, edit, "application/x-www-form-urlencoded")[0].startswith("303")
+    page = _request(app, run)[2].decode()
+    row = re.compile(r'<tr id="position-2">.*?</tr>', re.S)
+    assert row.search(page).group() == row.search(before).group()
+    for text in (
+        page,
+        *(_request(app, run + p)[2].decode() for p in ("/report", "/report?download=1")),
+    ):
+        section = text.split("Hypothetische Annahme – keine Quelldaten, kein Marktpreis", 1)[1]
+        assert "01.01.0020" in section and "Menge × EP, kaufmännisch auf Cent gerundet" in section
+        assert f"<td>4687.50</td><td>{amount}</td>" in section
+        assert f"Rechendifferenz (hypothetisch): {delta}" in section
+        assert "Angegebener Gesamtbetrag unverändert: 4687.50" in section
+    assert 'action="' + run + '/whatif"' in page and "/whatif" not in text
+    assert _what_if(app, run, position="2", field=field, value="")[0].startswith("303")
+    assert "Hypothetische Annahme" not in _request(app, run)[2].decode()
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"position": "2", "field": "total", "value": "1"},
+        {"position": "2", "field": "quantity", "value": "1e3"},
+        {"position": "2", "field": "quantity", "value": "-1"},
+        {"position": "0", "field": "quantity", "value": "1"},
+        {"position": "99", "field": "quantity", "value": "1"},
+        {"position": "٢", "field": "quantity", "value": "1"},
+    ],
+)
+def test_what_if_rejects_invalid_assumptions(tmp_path: Path, fields: dict[str, str]) -> None:
+    """Reject an assumption outside one position, one field and one plain decimal.
+
+    :param tmp_path: isolated web storage.
+    :param fields: invalid form fields.
+    """
+    app = make_app(tmp_path)
+    data = _legacy("84", *_INCOMPLETE)
+    run = _request(app, "/upload?name=test.D84", data, "application/octet-stream")[1]["Location"]
+    assert _what_if(app, run, **fields)[0].startswith("400")
+    assert "Hypothetische Annahme" not in _request(app, run)[2].decode()
+
+
+def test_what_if_route_guards(tmp_path: Path) -> None:
+    """Accept only form posts on reviews with positions.
+
+    :param tmp_path: isolated web storage.
+    """
+    app = make_app(tmp_path)
+    data = _legacy("84", *_INCOMPLETE)
+    run = _request(app, "/upload?name=test.D84", data, "application/octet-stream")[1]["Location"]
+    assert _request(app, run + "/whatif")[0].startswith("405")
+    form = b"position=2&field=quantity&value=1"
+    assert _request(app, run + "/whatif", form, "text/plain")[0].startswith("400")
+    pdf = _request(app, f"/upload?name={_ROOF.name}", _ROOF.read_bytes(), "application/pdf")
+    assert _what_if(app, pdf[1]["Location"], position="1", field="quantity", value="1")[
+        0
+    ].startswith("400")
+    assert _what_if(app, run, position="1", field="quantity", value="3")[0].startswith("303")
+    page = _request(app, run)[2].decode()
+    assert "nicht berechenbar: EP fehlt" in page
+
+
+@pytest.mark.parametrize(
+    ("item", "reason"),
+    [
+        (Item("1", "", "", Decimal(1), "psch", lump_sum=True, unit_price=Decimal(5)), "Pauschal"),
+        (
+            Item("1", "", "", Decimal(1), "m", unit_price=Decimal(5), price_basis=Decimal(100)),
+            "Preiseinheit",
+        ),
+        (
+            Item("1", "", "", Decimal(1), "m", unit_price=Decimal(5), adjusted_total=True),
+            "Preisanpassung",
+        ),
+        (Item("1", "", "", Decimal("1e70"), "m", unit_price=Decimal(5)), "nicht darstellbar"),
+    ],
+)
+def test_what_if_refuses_items_without_simple_arithmetic(item: Item, reason: str) -> None:
+    """Refuse a hypothetical amount where Menge × EP is not the line amount.
+
+    :param item: source position.
+    :param reason: expected part of the refusal.
+    """
+    result = what_if.evaluate(item, {"position": 1, "field": "quantity", "value": "2"})
+    assert reason in result["refused"]
+
+
+def test_what_if_rounds_half_up_and_escapes_text() -> None:
+    """Round half up to cents and escape source text in the rendered section."""
+    item = Item("<b>1</b>", "<script>x</script>", "", Decimal(1), "m", unit_price=Decimal("0.125"))
+    assumption = {"position": 1, "field": "quantity", "value": "1"}
+    assert what_if.evaluate(item, assumption)["hypothetical"][2] == Decimal("0.13")
+    html = what_if_section("/review/x", (item,), assumption, form=True)
+    assert "<script>" not in html and "&lt;b&gt;1&lt;/b&gt;" in html

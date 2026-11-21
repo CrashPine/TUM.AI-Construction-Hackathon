@@ -11,6 +11,7 @@ from urllib.parse import parse_qs
 from uuid import uuid4
 from wsgiref.simple_server import make_server
 
+from . import what_if
 from .attachment_scope import compare_attachment
 from .attachment_semantic import review_attachment
 from .docx_context import read_context
@@ -31,7 +32,7 @@ from .web_gaeb import review_legacy, review_positions, review_x83
 from .web_views import STATUSES, review_view, upload_view
 from .xlsx_lv import read_xlsx
 
-_RUN = re.compile(r"/review/([a-f0-9]{32})(?:/(pdf|log|report|resume|attachment))?")
+_RUN = re.compile(r"/review/([a-f0-9]{32})(?:/(pdf|log|report|resume|attachment|whatif))?")
 _MAX_UPLOAD = 32 * 1024 * 1024
 
 
@@ -360,6 +361,20 @@ def make_app(
                     runs[identifier] = (name, updated)
                     status = "303 See Other"
                     headers.append(("Location", base))
+                elif method == "POST" and subpage == "whatif":
+                    data = _read_body(
+                        env, 512 * 1024, media_type="application/x-www-form-urlencoded"
+                    )
+                    fields = parse_qs(data.decode("utf-8"), keep_blank_values=True)
+                    # A PDF review has no positions, so every position is rejected there.
+                    count = len(result.get("positions", ()))
+                    assumption = what_if.parse_assumption(fields, count)
+                    if assumption:
+                        result["what_if"] = assumption
+                    else:
+                        result.pop("what_if", None)
+                    status = "303 See Other"
+                    headers.append(("Location", base))
                 elif method == "POST" and subpage is None:
                     data = _read_body(
                         env, 512 * 1024, media_type="application/x-www-form-urlencoded"
@@ -389,7 +404,7 @@ def make_app(
                         headers.append(
                             ("Content-Disposition", 'attachment; filename="findings.md"')
                         )
-                elif method == "GET" and subpage not in ("resume", "attachment"):
+                elif method == "GET" and subpage not in ("resume", "attachment", "whatif"):
                     report = subpage == "report"
                     download = report and query.get("download") == ["1"]
                     body = review_view(base, name, result, report=report, download=download)
