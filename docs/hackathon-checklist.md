@@ -75,5 +75,11 @@ verification.
 - [x] Optionally filter metadata-compatible positions by local Ollama embeddings. Verified with synthetic vectors and an unavailable service.
 - [x] Import historical XLSX rows through an explicit local manifest, with workbook, sheet and row evidence.
 - [x] Shortlist projects by supplied summaries using local embeddings before matching positions.
-- [ ] Evaluate both retrieval stages on real comparable projects with an installed embedding model.
+- [x] Smoke-test both retrieval stages with real GAEB text and local nomic-embed-text:v1.5.
+  Project summaries built from up to 1,000 characters of section titles scored 0.969 for two
+  editions of the same LV and 0.708/0.712 for two other files. For six X83 queries against the
+  first twelve D86 descriptions of the same LV, all six matching positions passed both
+  0.75 and 0.90. The thresholds also admitted nine and three additional selections respectively.
+- [ ] Evaluate independent projects with reviewer-labelled comparable positions. Same-LV
+  editions validate retrieval only and do not count as independent quantity or price peers.
 - [ ] Add the separate legal retrieval demo after the core workflow.
