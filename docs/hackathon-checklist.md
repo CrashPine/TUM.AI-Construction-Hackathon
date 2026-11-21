@@ -26,6 +26,10 @@ verification.
   The four real X83 samples are unpriced. Arithmetic was verified with explicit fields in synthetic
   XML. Priced GAEB phase adapters remain open.
 - [x] Prepare the [90-second estimator demo](estimator-demo.md) on the real roof LV.
+- [x] Walk through the demo for PDF with DOCX attachment, X83, D86 and synthetic XLSX in one
+  acceptance test: status and Bieterfrage survive a reload, source links resolve, and the PDF
+  shows its text-layer coverage. Verified with no model configured; see the
+  [limitations](estimator-demo.md#acceptance-walk-through).
 
 ## Additional analysis and formats
 
