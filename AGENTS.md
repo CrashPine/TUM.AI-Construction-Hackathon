@@ -32,6 +32,8 @@ runtime dependencies. Dev tools: pytest, ruff (lint and format) and pydoclint (S
 
 Run the test and lint commands in the repository root before you open a pull request. pydoclint
 reads `pyproject.toml` from the current folder; in another folder it uses other defaults.
+CI (`.github/workflows/ci.yml`) runs the same commands on each pull request and each push to
+`main`; its `uv sync --locked` fails if `uv.lock` does not match `pyproject.toml`.
 
 Use the parser from Python:
 
