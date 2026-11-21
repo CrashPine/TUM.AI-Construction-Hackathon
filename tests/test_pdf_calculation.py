@@ -94,3 +94,22 @@ def test_real_ep_gp_table() -> None:
     findings, _ = table_prices([page])
     (finding,) = findings
     assert "4800.01" in finding.explanation and "4800.00" in finding.explanation
+
+
+def test_split_price_rows_across_pages() -> None:
+    """Verify both the whole priced LV and an altered carry-over row after a page break."""
+    path = Path(__file__).resolve().parents[1] / "data/raw/Abgabe LV.pdf"
+    with pymupdf.open(path) as document:
+        pages, _ = extract(document)
+    findings, coverage = table_prices(pages)
+    assert not findings
+    assert "248/248" in coverage
+    page = pages[30]
+    index = next(i for i, line in enumerate(page) if line.text == "18.200,00")
+    page[index] = replace(page[index], text="18.200,01")
+    findings, _ = table_prices(pages[29:31])
+    (finding,) = findings
+    assert "18200.01" in finding.explanation and "18200.00" in finding.explanation
+    assert all(line.page == 30 and line.oz == "3.1.3" for line in finding.passages[0])
+    page[:] = [replace(line, text="USD") if line.text == "EUR" else line for line in page]
+    assert not table_prices(pages[29:31])[0]

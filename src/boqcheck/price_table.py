@@ -1,7 +1,7 @@
 """Check priced PDF rows with an explicit EUR unit-price and total header."""
 
 import re
-from collections import defaultdict
+from dataclasses import replace
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 
 from .contradictions import Finding
@@ -17,16 +17,37 @@ def table_prices(pages: list[list[Line]]) -> tuple[list[Finding], str]:
     """
     findings = []
     checked = eligible = 0
+    position = None
     for page in pages:
-        rows = defaultdict(list)
-        for line in page:
-            rows[round(line.quad.rect.y0)].append(line)
+        rows: list[list[Line]] = []
+        for line in sorted(page, key=lambda cell: cell.quad.rect.y0):
+            if not rows or line.quad.rect.y0 - rows[-1][0].quad.rect.y0 > 1.25:
+                rows.append([])
+            rows[-1].append(line)
         columns = None
-        for row in rows.values():
+        split_header = None
+        split = False
+        for row in rows:
+            row = sorted(row, key=lambda line: line.quad.rect.x0)
             texts = [line.text for line in row]
-            if "Pos-Nr." in texts:
+            if texts == ["Pos-Nr. (Pos-", "Menge", "Einheit", "Einheitspreis in", "Gesamtpreis in"]:
+                split_header = row
+                split = False
                 columns = None
-                headers = sorted(row, key=lambda line: line.quad.rect.x0)
+                continue
+            if split_header is not None and not split:
+                split = texts == ["Nr.)", "EUR", "EUR"] and all(
+                    title.quad.rect.x0 <= currency.quad.rect.x0 <= title.quad.rect.x1
+                    for title, currency in zip(split_header[-2:], row[-2:], strict=True)
+                )
+                if not split:
+                    split_header = None
+                    position = None
+                continue
+            if "Pos-Nr." in texts:
+                position = None
+                columns = None
+                headers = row
                 if [line.text for line in headers] == [
                     "Pos-Nr.",
                     "Menge ME",
@@ -37,21 +58,44 @@ def table_prices(pages: list[list[Line]]) -> tuple[list[Finding], str]:
                 ]:
                     columns = [headers[i].quad.rect for i in (0, 1, 3, 5)]
                 continue
-            if columns is None:
+            cells = row
+            is_position = re.fullmatch(r"\d+(?:\.\d+){2,}[A-Za-z]?", cells[0].text)
+            if split:
+                first, qty_head, unit_head, price_head, total_head = split_header
+                if abs(cells[0].quad.rect.x0 - first.quad.rect.x0) < 5:
+                    if is_position:
+                        position = cells[0].text
+                        eligible += 1
+                    elif re.match(r"^\d+(?:\.|$)", cells[0].text):
+                        position = None
+                    continue
+                if position is None or len(cells) != 4:
+                    continue
+                if not (
+                    first.quad.rect.x1 < cells[0].quad.rect.x0 <= qty_head.quad.rect.x1
+                    and qty_head.quad.rect.x1 < cells[1].quad.rect.x0 < unit_head.quad.rect.x1
+                    and re.fullmatch(r"[A-Za-z²³][\w²³./-]*", cells[1].text)
+                    and abs(cells[2].quad.rect.x1 - price_head.quad.rect.x1) < 10
+                    and abs(cells[3].quad.rect.x1 - total_head.quad.rect.x1) < 10
+                ):
+                    continue
+                oz, position = position, None
+                cells = [replace(cell, oz=oz) for cell in cells]
+                values = (cells[0].text, cells[2].text, cells[3].text)
+            elif columns is not None and is_position:
+                eligible += 1
+                if len(cells) != 4 or abs(cells[0].quad.rect.x0 - columns[0].x0) > 5:
+                    continue
+                if any(abs(cells[i].quad.rect.x1 - columns[i].x1) > 10 for i in (1, 2, 3)):
+                    continue
+                quantity = re.fullmatch(rf"({_NUMBER})\s+[\w²³.]+", cells[1].text)
+                if not quantity:
+                    continue
+                oz = cells[0].text
+                values = (quantity[1], cells[2].text, cells[3].text)
+            else:
                 continue
-            cells = sorted(row, key=lambda line: line.quad.rect.x0)
-            if not re.fullmatch(r"\d+(?:\.\d+){2,}[A-Za-z]?", cells[0].text):
-                continue
-            eligible += 1
-            if len(cells) != 4 or abs(cells[0].quad.rect.x0 - columns[0].x0) > 5:
-                continue
-            if any(abs(cells[i].quad.rect.x1 - columns[i].x1) > 10 for i in (1, 2, 3)):
-                continue
-            quantity = re.fullmatch(rf"({_NUMBER})\s+[\w²³.]+", cells[1].text)
-            if not quantity or any(not re.fullmatch(_NUMBER, c.text) for c in cells[2:]):
-                continue
-            values = (quantity[1], cells[2].text, cells[3].text)
-            if any(len(v) > 18 for v in values):
+            if any(len(v) > 18 or not re.fullmatch(_NUMBER, v) for v in values):
                 continue
             qty, price, actual = [Decimal(v.replace(".", "").replace(",", ".")) for v in values]
             with localcontext() as context:
@@ -63,10 +107,12 @@ def table_prices(pages: list[list[Line]]) -> tuple[list[Finding], str]:
                     Finding(
                         "table_price",
                         (tuple(cells),),
-                        f"OZ {cells[0].text}: {qty} × {price} EUR = {expected} EUR. "
+                        f"OZ {oz}: {qty} × {price} EUR = {expected} EUR. "
                         f"Ausgewiesener Positionsbetrag: {actual} EUR.",
                         "Welcher Positionsbetrag ist anzusetzen?",
                         "conflict",
                     )
                 )
+        if not split:
+            position = None
     return findings, f"EP/GP-Tabellen: {checked}/{eligible} erkannte Positionszeilen geprüft."
