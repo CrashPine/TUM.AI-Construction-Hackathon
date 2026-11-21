@@ -12,6 +12,7 @@ from uuid import uuid4
 from wsgiref.simple_server import make_server
 
 from .attachment_scope import compare_attachment
+from .attachment_semantic import review_attachment
 from .docx_context import read_context
 from .history import RULES, SEVERITIES, initialize, model_patterns, promote, replay
 from .history_jobs import (
@@ -149,12 +150,13 @@ def _analyse(
     raise ValueError("Unterstützt werden PDF, GAEB und XLSX.")
 
 
-def _attach(env: dict, filename: str, result: dict) -> dict:
+def _attach(env: dict, filename: str, result: dict, semantic: SemanticConfig | None) -> dict:
     """Associate one validated DOCX with the selected review.
 
     :param env: request carrying the attachment.
     :param filename: name supplied for source references.
     :param result: existing review and any prior attachment.
+    :param semantic: model chosen for the PDF review, or None.
     :returns: updated review or the original for an identical retry.
     :raises ValueError: if the attachment is invalid or conflicts with an earlier upload.
     """
@@ -167,9 +169,14 @@ def _attach(env: dict, filename: str, result: dict) -> dict:
             raise ValueError("Diese Prüfung enthält bereits eine DOCX-Anlage.")
         return result
     entries, unread = read_context(data)
-    return compare_attachment(
+    result = compare_attachment(
         result, {"name": filename, "digest": digest, "entries": entries, "unread": unread}
     )
+    if "attachment_positions" in result:
+        result = review_attachment(result, semantic)
+        for finding in result["findings"]:
+            finding.setdefault("review_status", "open")
+    return result
 
 
 def _apply_history(path: Path, result: dict, trade: str) -> None:
@@ -236,6 +243,12 @@ def _resume(
     saved = {finding["id"]: finding for finding in previous["findings"]}
     if "attachment" in previous:
         result = compare_attachment(result, previous["attachment"])
+        # The model is not asked again, so its accepted findings carry over unchanged.
+        result["findings"] += [
+            f for f in previous["findings"] if f.get("rule") == "attachment_semantic"
+        ]
+        if "attachment_review" in previous:
+            result["attachment_review"] = previous["attachment_review"]
     for finding in result["findings"]:
         old = saved.get(finding["id"])
         if old and old["sources"] == finding["sources"]:
@@ -326,7 +339,12 @@ def make_app(
                 base = f"/review/{match[1]}"
                 if method == "POST" and subpage == "attachment":
                     filename = query.get("name", [""])[0][:200]
-                    updated = _attach(env, filename, result)
+                    model = (
+                        semantic
+                        if semantic and result.get("semantic_model") == semantic.model
+                        else None
+                    )
+                    updated = _attach(env, filename, result, model)
                     if updated is not result:
                         result = updated
                         if history_db is not None and result.get("persistent_batch"):
