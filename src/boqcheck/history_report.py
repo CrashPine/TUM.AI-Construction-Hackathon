@@ -29,6 +29,7 @@ class HistoryDataset:
     similarity: float = 0.75
     project_profiles: dict[str, str] | None = None
     current_profile: str = ""
+    authorization: str = ""
 
 
 def _position(row: dict) -> HistoricalPosition:
@@ -36,7 +37,10 @@ def _position(row: dict) -> HistoricalPosition:
 
     :param row: historical observation or current-position metadata.
     :returns: typed comparison input.
+    :raises ValueError: if the price type is neither net nor gross.
     """
+    if row.get("price_type", "") not in {"", "net", "gross"}:
+        raise ValueError("Price type must be net or gross.")
     return HistoricalPosition(
         **{
             key: Decimal(str(value)) if key in _NUMBERS and value is not None else value
@@ -51,17 +55,30 @@ def load_dataset(path: Path) -> HistoryDataset:
 
     :param path: explicitly configured local JSON file.
     :returns: comparison inputs and dataset provenance.
-    :raises ValueError: if the dataset cannot be decoded.
+    :raises ValueError: if the dataset cannot be decoded, a real dataset declares no
+        authorization, or one project source holds conflicting observations.
     """
     try:
         data = json.loads(path.read_text("utf8"), parse_float=Decimal)
-        if not isinstance(data["filename"], str) or not isinstance(data["synthetic"], bool):
+        authorization = data.get("authorization", "")
+        if (
+            not isinstance(data["filename"], str)
+            or not isinstance(data["synthetic"], bool)
+            or not isinstance(authorization, str)
+            or not (data["synthetic"] or authorization.strip())
+        ):
             raise ValueError("Invalid dataset metadata.")
         model = data.get("embedding_model", "")
         port = data.get("embedding_port", 11434)
         threshold = float(data.get("similarity", 0.75))
-        peers = [*data.get("peers", []), *workbook_peers(path.parent, data.get("projects", []))]
-        descriptions = tuple(row.get("description", "") for row in peers)
+        unique = {}
+        for row in [*data.get("peers", []), *workbook_peers(path.parent, data.get("projects", []))]:
+            entry = (_position(row), row.get("description", ""))
+            # Re-ingesting the same source is harmless; differing values are not.
+            if unique.setdefault((entry[0].project, entry[0].source), entry) != entry:
+                raise ValueError(f"Conflicting observations for {entry[0].source}.")
+        positions = [position for position, _ in unique.values()]
+        descriptions = tuple(description for _, description in unique.values())
         if (
             not isinstance(model, str)
             or type(port) is not int
@@ -85,13 +102,14 @@ def load_dataset(path: Path) -> HistoryDataset:
             data["sha256"],
             data["synthetic"],
             {oz: _position(row) for oz, row in data["current"].items()},
-            [_position(row) for row in peers],
+            positions,
             descriptions,
             model,
             port,
             threshold,
             profiles,
             current_profile,
+            authorization.strip(),
         )
     except (OSError, ValueError, KeyError, TypeError, AttributeError, InvalidOperation) as error:
         raise ValueError(f"Invalid historical dataset: {path.name}") from error

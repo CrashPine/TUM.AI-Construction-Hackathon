@@ -237,7 +237,13 @@ Pass `scale` and `scale_unit` for quantity comparisons, and `currency`,
 `price_type`, `market`, and `price_period` for price comparisons. Peer rows
 also supply `quantity`, `price` and `price_basis` as applicable. The current
 quantity, price and price basis come from the XLSX. The web report requires
-three distinct comparable projects for a reference range. See
+three distinct comparable projects for a reference range. `price_type` must be
+`net` or `gross`. A dataset with `synthetic` false needs a nonempty top-level
+`authorization` naming its usage basis; the report shows it as declared, not
+verified. Identical rows for the same project and source load once; differing
+rows are rejected. For each comparison the report lists missing current fields
+and how many peers were excluded as the same project, duplicates, without
+metadata or on another basis. See
 `test_historical_comparison_export` in `tests/test_web.py` for a synthetic example.
 For semantic peer selection, add a top-level `embedding_model` naming an installed
 Ollama embedding model and a `description` for each peer. Set `embedding_port`

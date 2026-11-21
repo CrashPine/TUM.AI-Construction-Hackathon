@@ -319,6 +319,7 @@ def make_app(
                 ):
                     result["historical_comparisons"] = report_history(dataset, result["positions"])
                     result["synthetic_history"] = dataset.synthetic
+                    result["history_authorization"] = dataset.authorization
                 if history_db is not None:
                     _apply_history(history_db, result, trade)
                 for finding in result["findings"]:

@@ -89,6 +89,9 @@ verification.
   editions of the same LV and 0.708/0.712 for two other files. For six X83 queries against the
   first twelve D86 descriptions of the same LV, all six matching positions passed both
   0.75 and 0.90. The thresholds also admitted nine and three additional selections respectively.
+- [x] Validate historical records: net/gross price type, declared usage authorization for
+  non-synthetic data, one record per project and source, missing-field and exclusion counts in
+  the report. Verified on synthetic data.
 - [ ] Evaluate independent projects with reviewer-labelled comparable positions. Same-LV
   editions validate retrieval only and do not count as independent quantity or price peers.
 - [x] Freeze an offline acceptance baseline: exact rule findings for all 43 supported samples,

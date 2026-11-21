@@ -283,6 +283,30 @@ def _positions(
     )
 
 
+_FIELDS = {
+    "quantity": "Menge",
+    "scale": "Bezugsgröße",
+    "scale_unit": "Bezugseinheit",
+    "price": "Einheitspreis",
+    "price_basis": "Preisbasis",
+    "currency": "Währung",
+    "price_type": "Netto/Brutto",
+    "market": "Markt",
+    "price_period": "Preisstand",
+    "project": "Projekt",
+    "source": "Quelle",
+    "trade": "Gewerk",
+    "scope": "Leistungsumfang",
+    "unit": "Einheit",
+}
+_EXCLUSIONS = {
+    "current_project": "gleiches Projekt",
+    "duplicate": "doppelt",
+    "missing_metadata": "ohne Metadaten",
+    "different_basis": "andere Vergleichsbasis",
+}
+
+
 def _history_comparison(result: dict, report: bool) -> str:
     """Render historical comparison coverage and evidence.
 
@@ -295,6 +319,11 @@ def _history_comparison(result: dict, report: bool) -> str:
     parts = ["<h2>Historischer Mengen- und Preisvergleich</h2>"]
     if result["synthetic_history"]:
         parts.append("<p>Synthetische Beispieldaten. Keine Marktpreise.</p>")
+    if result.get("history_authorization"):
+        parts.append(
+            "<p>Nutzungsfreigabe laut Datensatz, nicht geprüft: "
+            f"{escape(result['history_authorization'])}</p>"
+        )
     if not result["historical_comparisons"]:
         parts.append("<p>Keine eindeutig zugeordneten Positionen.</p>")
     statuses = {
@@ -313,6 +342,16 @@ def _history_comparison(result: dict, report: bool) -> str:
         for key, label in (("quantity", "Menge"), ("unit_price", "Einheitspreis")):
             comparison = entry["results"][key]
             parts.append(f"<p><b>{label}:</b> {statuses[comparison['status']]}</p>")
+            if comparison.get("missing"):
+                fields = ", ".join(_FIELDS[name] for name in comparison["missing"])
+                parts.append(f"<p>Fehlende Angaben: {fields}</p>")
+            if comparison.get("excluded"):
+                counts = ", ".join(
+                    f"{comparison['excluded'][key]} {text}"
+                    for key, text in _EXCLUSIONS.items()
+                    if key in comparison["excluded"]
+                )
+                parts.append(f"<p>Ausgeschlossen (Vergleichsstufe): {counts}</p>")
             if "value" not in comparison:
                 continue
             basis = escape(" / ".join(comparison["basis"]))

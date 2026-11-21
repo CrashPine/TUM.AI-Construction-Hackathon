@@ -1,5 +1,6 @@
 """Calculate anomalies from explicitly comparable historical positions."""
 
+from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
 from statistics import median
@@ -34,6 +35,25 @@ def _positive(value: Decimal | None) -> bool:
     return value is not None and value.is_finite() and value > 0
 
 
+_REQUIRED = {
+    "quantity": (("quantity", "scale"), ("scale_unit",)),
+    "unit_price": (("price", "price_basis"), ("currency", "price_type", "market", "price_period")),
+}
+
+
+def _missing(position: HistoricalPosition, kind: str) -> list[str]:
+    """List the fields that prevent a normalized observation.
+
+    :param position: observation with source metadata.
+    :param kind: quantity or unit price.
+    :returns: names of absent texts and of absent or non-positive numbers.
+    """
+    numbers, texts = _REQUIRED[kind]
+    missing = [name for name in numbers if not _positive(getattr(position, name))]
+    fields = ("project", "source", "trade", "scope", "unit", *texts)
+    return missing + [name for name in fields if not getattr(position, name)]
+
+
 def _measure(position: HistoricalPosition, kind: str) -> tuple[tuple[str, ...], Decimal] | None:
     """Normalize one observation using its declared denominators.
 
@@ -41,22 +61,11 @@ def _measure(position: HistoricalPosition, kind: str) -> tuple[tuple[str, ...], 
     :param kind: quantity or unit price.
     :returns: the comparison dimensions and normalized value, if supported.
     """
-    key = (position.trade, position.scope, position.unit)
-    if not all((*key, position.project, position.source)):
+    if _missing(position, kind):
         return None
-    if kind == "quantity":
-        if position.scale_unit and _positive(position.quantity) and _positive(position.scale):
-            return (*key, position.scale_unit), position.quantity / position.scale
-    elif (
-        all((position.currency, position.price_type, position.market, position.price_period))
-        and _positive(position.price)
-        and _positive(position.price_basis)
-    ):
-        return (
-            (*key, position.currency, position.price_type, position.market, position.price_period),
-            position.price / position.price_basis,
-        )
-    return None
+    numerator, denominator = (getattr(position, name) for name in _REQUIRED[kind][0])
+    texts = (getattr(position, name) for name in _REQUIRED[kind][1])
+    return (position.trade, position.scope, position.unit, *texts), numerator / denominator
 
 
 def compare_history(
@@ -72,7 +81,8 @@ def compare_history(
     :param history: candidate historical observations.
     :param min_projects: minimum number of independent historical projects.
     :param threshold: relative deviation from the median required outside the peer range.
-    :returns: quantity and price results with status, comparison basis and peer evidence.
+    :returns: quantity and price results with status, comparison basis, peer evidence,
+        missing current fields and counts of skipped peers.
     :raises ValueError: if the comparison settings are invalid.
     """
     if min_projects < 2 or not _positive(threshold):
@@ -81,24 +91,33 @@ def compare_history(
     for kind in ("quantity", "unit_price"):
         observed = _measure(current, kind)
         if observed is None:
-            output[kind] = {"status": "unavailable"}
+            output[kind] = {"status": "unavailable", "missing": _missing(current, kind)}
             continue
         basis, value = observed
         projects = {}
         seen = set()
+        excluded = Counter()
         for peer in history:
             identifier = (peer.project, peer.source)
-            if peer.project == current.project or identifier in seen:
-                continue
             match = _measure(peer, kind)
-            if match and match[0] == basis:
+            if peer.project == current.project:
+                excluded["current_project"] += 1
+            elif identifier in seen:
+                excluded["duplicate"] += 1
+            elif match is None:
+                excluded["missing_metadata"] += 1
+            elif match[0] != basis:
+                excluded["different_basis"] += 1
+            else:
                 projects.setdefault(peer.project, []).append((peer.source, match[1]))
-                seen.add(identifier)
+            seen.add(identifier)
         peers = [
             {"project": project, "value": median([v for _, v in records]), "sources": records}
             for project, records in sorted(projects.items())
         ]
         result = {"status": "insufficient_evidence", "basis": basis, "value": value, "peers": peers}
+        if excluded:
+            result["excluded"] = dict(excluded)
         if len(peers) >= min_projects:
             values = [p["value"] for p in peers]
             center, low, high = median(values), min(values), max(values)
