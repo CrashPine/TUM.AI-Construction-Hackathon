@@ -28,3 +28,21 @@ Local model: `bonsai-2:27b`. Each run covered both pages and completed every pla
 
 These two runs exercise the zero-findings path on real PDFs. A real-document positive case
 detected independently by the model remains open.
+
+## Live regression on the supplied corpus
+
+The deterministic contradiction, scope and price rules ran across 34 PDFs and
+836 text-layer pages. They produced three contradiction candidates in three
+files: the roof scope case and two occurrences of the shaft aggregate case.
+
+| Real input | Rule candidates | Ollama candidates | Model coverage |
+| --- | ---: | ---: | --- |
+| LV_09_Porenbetondach.pdf | 1 | 0 | 6/6; all text lines on four pages |
+| LV-Schachtbauwerk.pdf | 1 | 0 | 1/3 on the selected shaft pages; only part of page 5 was sent |
+| LV_15_Abdichtung_Aussenwaende.pdf | 0 | 0 | 1/1; both pages |
+| LV_15a_Abdichtung_Bodenplatte_Buero.pdf | 0 | 0 | 1/3; partial page 2 |
+
+Model: local bonsai-2:27b. The roof case was missed despite full text coverage.
+The short shaft run did not supply both passages, so it measures coverage rather
+than detection. No new false positives were observed in these runs. This small
+sample is not a corpus-wide precision or recall estimate.
