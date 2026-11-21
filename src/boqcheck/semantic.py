@@ -50,7 +50,7 @@ class _NoRedirect(HTTPRedirectHandler):
 class SemanticConfig:
     """Connection settings and the review budget.
 
-    :ivar endpoint: loopback OpenAI-compatible chat completions URL.
+    :ivar endpoint: loopback Ollama or OpenAI-compatible chat URL.
     :ivar model: model ID exposed by the inference server.
     :ivar max_requests: maximum number of comparisons per run.
     :ivar timeout: timeout in seconds for each comparison.
@@ -95,7 +95,7 @@ def _comparisons(windows: list[list[str]]) -> Iterator[tuple[list[str], list[str
 
 
 def _request(config: SemanticConfig, payload: dict) -> list:
-    """Read one constrained JSON response over the configured tunnel.
+    """Read one constrained JSON response from a loopback endpoint.
 
     :param config: inference connection and time budget.
     :param payload: source excerpts for the comparison.
@@ -107,26 +107,34 @@ def _request(config: SemanticConfig, payload: dict) -> list:
         raise ValueError("Expected an HTTP(S) loopback endpoint.")
     if url.hostname != "localhost" and not ipaddress.ip_address(url.hostname).is_loopback:
         raise ValueError("Expected an HTTP(S) loopback endpoint.")
+    ollama = url.path.rstrip("/") == "/api/chat"
+    body = {
+        "model": config.model,
+        "messages": [
+            {"role": "system", "content": _PROMPT},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ],
+    }
+    if ollama:
+        body.update(
+            stream=False,
+            think=False,
+            format="json",
+            options={"temperature": 0, "num_ctx": 8192, "num_predict": 1536},
+        )
+    else:
+        body.update(temperature=0, max_tokens=4096)
     request = Request(
         config.endpoint,
-        data=json.dumps(
-            {
-                "model": config.model,
-                "temperature": 0,
-                "max_tokens": 4096,
-                "messages": [
-                    {"role": "system", "content": _PROMPT},
-                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-                ],
-            }
-        ).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json; charset=utf-8"},
     )
     with build_opener(ProxyHandler({}), _NoRedirect()).open(
         request, timeout=config.timeout
     ) as response:
         envelope = json.loads(response.read(1_000_001))
-    content = envelope["choices"][0]["message"]["content"]
+    message = envelope["message"] if ollama else envelope["choices"][0]["message"]
+    content = message["content"]
     if not isinstance(content, str):
         raise ValueError("Missing chat response content.")
     content = content.strip()

@@ -166,14 +166,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pdf", type=Path, help="input PDF")
     parser.add_argument("output", type=Path, help="new output directory")
-    parser.add_argument("--endpoint", help="loopback chat completions URL")
+    parser.add_argument("--endpoint", help="loopback Ollama or chat completions URL")
     parser.add_argument("--model", help="model ID exposed by the endpoint")
     parser.add_argument("--max-requests", type=int, default=24, help="semantic comparison budget")
+    parser.add_argument("--timeout", type=float, default=90, help="seconds per model comparison")
     args = parser.parse_args()
-    if bool(args.endpoint) != bool(args.model) or args.max_requests < 1:
-        parser.error("provide --endpoint and --model together and a positive --max-requests")
+    if bool(args.endpoint) != bool(args.model) or args.max_requests < 1 or not args.timeout > 0:
+        parser.error("provide --endpoint and --model together and positive comparison limits")
     semantic = (
-        SemanticConfig(args.endpoint, args.model, args.max_requests) if args.endpoint else None
+        SemanticConfig(args.endpoint, args.model, args.max_requests, args.timeout)
+        if args.endpoint
+        else None
     )
     try:
         result = review_pdf(args.pdf.name, args.pdf.read_bytes(), args.output, semantic=semantic)
