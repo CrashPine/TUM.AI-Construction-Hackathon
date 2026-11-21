@@ -35,11 +35,26 @@ def _text(p: ET.Element) -> str:
     ).strip()
 
 
-def read_context(data: bytes) -> list[dict]:
+def _has_text(block: ET.Element) -> bool:
+    """Tell whether a skipped block holds visible text or embedded content.
+
+    :param block: body or cell element the reader does not extract.
+    :returns: whether skipping it hides content from the comparison.
+    """
+    return any(
+        node.tag == _W + "altChunk" or (node.tag == _W + "t" and (node.text or "").strip())
+        for node in block.iter()
+    )
+
+
+def read_context(data: bytes) -> tuple[list[dict], int]:
     """Extract body paragraphs and top-level table cells with stable source references.
 
+    Content controls, nested tables and embedded chunks are not extracted; they are counted
+    so that the comparison can say which parts it did not assess.
+
     :param data: complete DOCX bytes.
-    :returns: nonempty excerpts in body order.
+    :returns: nonempty excerpts in body order and the number of skipped blocks with content.
     :raises ValueError: if the document cannot be imported or has no supported text.
     """
     try:
@@ -54,7 +69,7 @@ def read_context(data: bytes) -> list[dict]:
     if body is None:
         raise ValueError("DOCX ohne Dokumentkörper.")
     entries = []
-    paragraph = table = 0
+    paragraph = table = unread = 0
     for block in body:
         if block.tag == _W + "p":
             paragraph += 1
@@ -73,7 +88,9 @@ def read_context(data: bytes) -> list[dict]:
         elif block.tag == _W + "tbl":
             table += 1
             for row, tr in enumerate(block.findall(_W + "tr"), 1):
+                unread += sum(_has_text(child) for child in tr if child.tag != _W + "tc")
                 for col, tc in enumerate(tr.findall(_W + "tc"), 1):
+                    unread += sum(_has_text(child) for child in tc if child.tag != _W + "p")
                     text = "\n".join(filter(None, map(_text, tc.findall(_W + "p"))))
                     if text:
                         entries.append(
@@ -83,6 +100,8 @@ def read_context(data: bytes) -> list[dict]:
                                 "text": text,
                             }
                         )
+        else:
+            unread += _has_text(block)
     if not entries:
         raise ValueError("Keine lesbaren Absätze oder Tabellenzellen im DOCX.")
-    return entries
+    return entries, unread

@@ -430,6 +430,12 @@ def review_view(
             f"<p>Automatischer Abgleich LV / DOCX: {result['attachment_checked']} "
             "eindeutig zugeordnete Positionsangaben geprüft.</p>"
         )
+        if unread := attachment.get("unread"):
+            content.append(
+                f"<p>{unread} Textblöcke der Anlage nicht bewertet (Inhaltssteuerelemente, "
+                "verschachtelte Tabellen oder eingebettete Inhalte); kein vollständiger Abgleich."
+                "</p>"
+            )
     entries = {entry["id"]: entry for entry in attachment["entries"]} if attachment else {}
     if attachment and not report:
         content.append(
