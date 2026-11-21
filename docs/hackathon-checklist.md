@@ -70,5 +70,6 @@ verification.
   with its filename and paragraph or cell reference. Verify upload isolation and retry.
 - [x] Add mapped XLSX import with worksheet and row evidence. Verified via synthetic workbook upload and HTML export.
 - [x] Label unsupported upload formats in the UI until their adapters pass fixture checks.
-- [ ] Check historical quantity and unit-price anomalies using comparable records and explicit units.
+- [x] Calculate historical quantity and price anomalies from explicit comparison metadata and sourced peers. Verified both on synthetic data.
+- [ ] Add historical ingestion, local embedding retrieval and anomaly results to the web report.
 - [ ] Add the separate legal retrieval demo after the core workflow.
