@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 
 import pymupdf
 
-from .contradictions import find_contradictions
+from .contradictions import find_contradictions, rule_scope
 from .pdf_annotate import annotate
 from .pdf_extract import Line, extract
 from .semantic import SemanticConfig, semantic_review
@@ -203,6 +203,7 @@ def review_pdf(
         "candidates": len(findings),
         "page_count": len(pages),
         "text_pages": len(pages) - len(skipped),
+        "rule_scope": rule_scope(pages),
         "findings": records,
         "semantic_coverage": coverage,
         "warnings": warnings,

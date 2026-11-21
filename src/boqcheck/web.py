@@ -127,14 +127,18 @@ def make_app(
 
         try:
             if method == "GET" and path == "/":
-                body = upload_view(semantic.model if semantic else None)
+                body = upload_view(
+                    semantic.model if semantic else None, history=history_db is not None
+                )
             elif method == "POST" and path == "/upload":
                 name = query.get("name", ["upload.pdf"])[0][:200]
                 identifier = uuid4().hex
                 selected = semantic if query.get("semantic") == ["1"] else None
                 result = _analyse(env, name, directory / identifier, selected)
                 if history_db is not None:
-                    result["history"] = replay(history_db, result)
+                    trade = query.get("trade", [""])[0].strip()[:120]
+                    result["history_trade"] = trade
+                    result["history"] = replay(history_db, result, trade=trade)
                     matched = {
                         identifier
                         for pattern in result["history"]

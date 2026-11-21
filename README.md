@@ -43,6 +43,9 @@ the report, annotated PDF or log before stopping it. To retain a confirmed PDF r
 select its history checkbox and enter a reviewer identifier before saving. Confirmed cases
 promoted this way persist in `bidguard-history.sqlite3` (override with `--history-db PATH`).
 The next upload reports coverage for saved drawing-scope and aggregate-limit rules.
+Enter the trade on upload to restrict historical matches to cases tagged with that trade and
+untagged cases. With the field blank, all saved rules are considered. Position cues are checked
+against extracted PDF text, and the report explains skipped or inconclusive historical rules.
 
 ### Command-line review
 

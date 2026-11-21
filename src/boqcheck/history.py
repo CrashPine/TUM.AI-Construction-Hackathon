@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from collections import defaultdict
 from collections.abc import Iterable
 from contextlib import closing
 from pathlib import Path
@@ -71,37 +72,51 @@ def promote(
             )
 
 
-def replay(path: Path, result: dict) -> list[dict]:
+def replay(path: Path, result: dict, *, trade: str = "") -> list[dict]:
     """Classify every saved rule against outcomes already computed in this run.
 
     :param path: initialized SQLite database.
     :param result: current document analysis with findings and extraction coverage.
+    :param trade: optional trade entered for the current document.
     :returns: stable priority order with coverage and matching finding IDs.
     """
     with closing(sqlite3.connect(path)) as connection:
         rows = connection.execute(
-            """SELECT p.rule, MAX(c.severity), COUNT(c.rule)
+            """SELECT p.rule, c.trade, MAX(c.severity), COUNT(c.rule)
                FROM patterns p JOIN confirmed_cases c ON p.rule=c.rule
-               GROUP BY p.rule"""
+               GROUP BY p.rule, c.trade"""
         ).fetchall()
+    by_rule = defaultdict(list)
+    for rule, saved_trade, severity, count in rows:
+        by_rule[rule].append((" ".join(saved_trade.casefold().split()), severity, count))
+    current = " ".join(trade.casefold().split())
     history = []
-    for rule, severity, cases in rows:
+    for rule, groups in by_rule.items():
+        applicable = [group for group in groups if not current or group[0] in ("", current)]
+        relevant = applicable or groups
+        severity = max(group[1] for group in relevant)
+        cases = sum(group[2] for group in relevant)
         matches = [f["id"] for f in result["findings"] if f.get("rule") == rule]
         if rule not in RULES:
-            status = "inconclusive"
+            status, reason = "inconclusive", "unsupported_rule"
         elif "gaeb" in result:
-            status = "inapplicable"
+            status, reason = "inapplicable", "format"
+        elif not applicable:
+            status, reason = "inapplicable", "trade"
         elif result["text_pages"] < result["page_count"] and not matches:
-            status = "inconclusive"
+            status, reason = "inconclusive", "partial_text"
+        elif not matches and rule not in result.get("rule_scope", ()):
+            status, reason = "inapplicable", "scope"
         else:
-            status = "checked"
+            status, reason = "checked", "evaluated"
         history.append(
             {
                 "rule": rule,
                 "severity": severity,
                 "cases": cases,
                 "status": status,
-                "matches": matches,
+                "reason": reason,
+                "matches": matches if status == "checked" else [],
             }
         )
     return sorted(

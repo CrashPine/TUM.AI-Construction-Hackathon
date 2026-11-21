@@ -34,8 +34,10 @@ verification.
 - [x] Persist explicitly promoted, confirmed PDF rule cases in SQLite with source evidence and
   reviewer provenance. Deduplicate patterns and repeated promotions. Show empty-history coverage
   and match saved PDF rules against new uploads in stable priority order.
-- [ ] Complete historical replay with applicability based on trade and position attributes,
-  reusable patterns for model findings, and resumable batches with deferred coverage.
+- [x] Filter existing historical PDF rules by an optional trade and by the position and component
+  cues used by each rule. Show why a rule is inapplicable or inconclusive.
+- [ ] Complete historical replay with reusable patterns for model findings and resumable batches
+  with deferred coverage.
 - [ ] Detect ambiguous or potentially unpriced scope with evidence and a German Bieterfrage.
 - [ ] Check German spelling with a dictionary and trade lexicon.
 - [ ] Evaluate model-proposed formulas through typed expressions and Decimal.

@@ -186,6 +186,23 @@ def test_only_confirmed_cases_are_promoted_and_replayed_after_restart(tmp_path: 
         assert case[:3] == ("QA", "Dach", 3)
         assert "9.2.3" in case[3] and "9.2.4" in case[3]
 
+    matching_upload = upload + "&" + urlencode({"trade": " DACH  "})
+    matching = _request(restarted, matching_upload, body, "application/pdf")[1]["Location"]
+    assert "Historischer Regel-Treffer" in _request(restarted, matching)[2].decode()
+
+    different_upload = upload + "&trade=Elektro"
+    different = _request(restarted, different_upload, body, "application/pdf")[1]["Location"]
+    page = _request(restarted, different)[2].decode()
+    assert "Nicht anwendbar (anderes Gewerk)" in page
+    assert "Historischer Regel-Treffer" not in page
+    assert "OZ 9.2.3" in page and "OZ 9.2.4" in page
+
+    with pymupdf.open() as unrelated:
+        unrelated.new_page().insert_text((72, 72), "Fassadenfarbe der Nebenanlage")
+        clean = _request(restarted, matching_upload, unrelated.tobytes(), "application/pdf")
+    page = _request(restarted, clean[1]["Location"])[2].decode()
+    assert "Nicht anwendbar (keine passenden Positionsmerkmale)" in page
+
 
 def test_history_priority_and_coverage(tmp_path: Path) -> None:
     """Prioritize severity first and report non-PDF or unreadable coverage.
@@ -200,6 +217,7 @@ def test_history_priority_and_coverage(tmp_path: Path) -> None:
     coverage = replay(db, {"findings": [], "text_pages": 0, "page_count": 1})
     assert [entry["rule"] for entry in coverage] == ["aggregate_limit", "scope_reference"]
     assert {entry["status"] for entry in coverage} == {"inconclusive"}
+    assert {entry["reason"] for entry in coverage} == {"partial_text"}
     assert {entry["status"] for entry in replay(db, {"findings": [], "gaeb": {}})} == {
         "inapplicable"
     }

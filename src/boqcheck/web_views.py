@@ -15,10 +15,18 @@ _RULE_NAMES = {
     "scope_reference": "Zeichnungsumfang",
     "aggregate_limit": "Körnungsgrenze",
 }
+_HISTORY_REASONS = {
+    "format": "Regel gilt nur für PDF",
+    "trade": "anderes Gewerk",
+    "partial_text": "PDF-Text nur teilweise verfügbar",
+    "scope": "keine passenden Positionsmerkmale",
+    "unsupported_rule": "Regel nicht verfügbar",
+}
 _HISTORY_FIELDS = """
 <fieldset><legend>Für das Speichern in der Historie</legend>
 <label for="reviewer">Prüferkürzel</label><input id="reviewer" name="reviewer" maxlength="120">
-<label for="trade">Gewerk (optional)</label><input id="trade" name="trade" maxlength="120">
+<label for="trade">Gewerk (optional)</label>
+<input id="trade" name="trade" maxlength="120" value="<!--current-trade-->">
 <label for="severity">Priorität</label><select id="severity" name="severity">
 <option value="low">Niedrig</option><option value="medium" selected>Mittel</option>
 <option value="high">Hoch</option></select></fieldset>
@@ -50,6 +58,7 @@ _UPLOAD = """
   <input id="lv" type="file" accept=".pdf,.x83,application/pdf" required>
   <p class="badge">GAEB 90, DOCX und XLSX werden derzeit nicht unterstützt.</p>
   <!--model-option-->
+  <!--history-option-->
   <div class="actions"><button>Datei prüfen</button></div>
   <p id="progress" role="status"></p>
 </form>
@@ -70,6 +79,8 @@ form.addEventListener('submit', async (event) => {
   status.textContent = 'Datei wird geprüft …';
   try {
     const query = new URLSearchParams({name: file.name});
+    const trade = document.querySelector('#history-trade')?.value.trim();
+    if (trade) query.set('trade', trade);
     if (model?.checked && !model.disabled) query.set('semantic', '1');
     const response = await fetch('/upload?' + query, {
       method: 'POST', headers: {'Content-Type': type}, body: file
@@ -101,10 +112,11 @@ def _page(title: str, content: str) -> str:
     )
 
 
-def upload_view(model: str | None = None) -> str:
+def upload_view(model: str | None = None, *, history: bool = False) -> str:
     """Render the single-file upload page.
 
     :param model: local model name, when available.
+    :param history: whether optional trade metadata is used for historical checks.
     :returns: complete upload view.
     """
     option = (
@@ -113,7 +125,14 @@ def upload_view(model: str | None = None) -> str:
         if model
         else ""
     )
-    return _page("LV prüfen", _UPLOAD.replace("<!--model-option-->", option))
+    trade = (
+        '<label for="history-trade">Gewerk für historische Regeln (optional)</label>'
+        '<input id="history-trade" maxlength="120">'
+        if history
+        else ""
+    )
+    body = _UPLOAD.replace("<!--model-option-->", option).replace("<!--history-option-->", trade)
+    return _page("LV prüfen", body)
 
 
 def _finding(base: str, finding: dict, report: bool, history: bool) -> str:
@@ -254,12 +273,18 @@ def review_view(
     history = "history" in result
     if history:
         content.append("<h2>Historische Regeln</h2>")
+        if trade := result["history_trade"]:
+            content.append(f"<p>Gewerk: {escape(trade)}</p>")
         if result["history"]:
             entries = []
             for pattern in result["history"]:
                 label = escape(_RULE_NAMES.get(pattern["rule"], pattern["rule"]))
                 status = _HISTORY_STATUS[pattern["status"]]
-                entries.append(f"<li>{label} · {status} · {pattern['cases']} bestätigte Fälle</li>")
+                reason = _HISTORY_REASONS.get(pattern["reason"])
+                detail = f" ({reason})" if reason else ""
+                entries.append(
+                    f"<li>{label} · {status}{detail} · {pattern['cases']} bestätigte Fälle</li>"
+                )
             content.append("<ul>" + "".join(entries) + "</ul>")
         else:
             content.append("<p>Keine historischen Regeln gespeichert.</p>")
@@ -270,7 +295,9 @@ def review_view(
     content.extend(_finding(base, finding, report, history) for finding in findings)
     if findings and not report:
         if history and any(f.get("rule") in RULES for f in findings):
-            content.append(_HISTORY_FIELDS)
+            content.append(
+                _HISTORY_FIELDS.replace("<!--current-trade-->", escape(result["history_trade"]))
+            )
         content.append('<div class="actions"><button>Änderungen speichern</button></div></form>')
     if report:
         questions = [

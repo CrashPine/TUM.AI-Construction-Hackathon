@@ -110,3 +110,25 @@ def find_contradictions(pages: list[list[Line]]) -> list[Finding]:
                     )
                 )
     return findings
+
+
+def rule_scope(pages: list[list[Line]]) -> list[str]:
+    """Identify the position and component cues needed by the existing PDF rules.
+
+    :param pages: source lines by page.
+    :returns: rule identifiers with applicable text in the document.
+    """
+    has_drawings = has_roof = has_shaft = False
+    for page in pages:
+        for line in page:
+            has_drawings |= bool(line.oz and _DRAWINGS.search(line.text))
+            has_roof |= bool(_ROOF.search(line.text))
+            has_shaft |= bool(_SHAFT.search(line.text))
+    return [
+        rule
+        for rule, applicable in (
+            ("scope_reference", has_drawings and has_roof),
+            ("aggregate_limit", has_shaft),
+        )
+        if applicable
+    ]
