@@ -42,7 +42,10 @@ verification.
   synthetic uploads with a simulated model response.
 - [x] Persist completed historical batches and resume deferred templates on the same PDF without
   redoing finished model calls. Verify recovery after restart and preservation of review edits.
-- [ ] Detect ambiguous or potentially unpriced scope with evidence and a German Bieterfrage.
+- [x] Flag explicitly open PDF specifications and compensation terms with source evidence,
+  pricing impact and a German Bieterfrage. Check matching adjacent positions and applicable
+  general clauses. Verify that included work does not become a missing-scope finding.
+- [ ] Extend scope review to ambiguous free text and supporting documents once those are imported.
 - [ ] Check German spelling with a dictionary and trade lexicon.
 - [ ] Evaluate model-proposed formulas through typed expressions and Decimal.
 - [ ] Add GAEB 90 D84, D83 and D86, then supporting DOCX and mapped XLSX imports with evidence.

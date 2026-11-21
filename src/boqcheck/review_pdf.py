@@ -14,6 +14,7 @@ from .contradictions import Finding, find_contradictions, rule_scope
 from .history import review_model_patterns
 from .pdf_annotate import annotate
 from .pdf_extract import Line, extract
+from .scope import find_scope_questions
 from .semantic import SemanticConfig, semantic_review
 
 
@@ -141,7 +142,7 @@ def review_pdf(
         if not document.is_pdf or document.is_encrypted or document.needs_pass or not len(document):
             raise ValueError("Input must be a nonempty, unencrypted PDF.")
         pages, skipped = extract(document)
-        findings = find_contradictions(pages)
+        findings = find_contradictions(pages) + find_scope_questions(pages)
         warnings = [f"PDF-Seite {page}: kein extrahierbarer Text (keine OCR)." for page in skipped]
         pending, state = _model_batch(pages, semantic, templates or [], checkpoint)
         model_history = state["outcomes"]
@@ -158,8 +159,11 @@ def review_pdf(
                 (
                     finding
                     for finding in findings
-                    if (left[0] in finding.passages[0] and right[0] in finding.passages[1])
-                    or (right[0] in finding.passages[0] and left[0] in finding.passages[1])
+                    if len(finding.passages) == 2
+                    and (
+                        (left[0] in finding.passages[0] and right[0] in finding.passages[1])
+                        or (right[0] in finding.passages[0] and left[0] in finding.passages[1])
+                    )
                 ),
                 None,
             )
@@ -188,6 +192,14 @@ def review_pdf(
                     "Materialanforderung",
                     "Die geforderte Körnung wirkt sich auf die Materialkalkulation aus.",
                 ),
+                "open_scope": (
+                    "Unklare Leistungsbeschreibung",
+                    "Der Aufwand für Material oder Ausführung bleibt offen.",
+                ),
+                "open_pricing": (
+                    "Offene Vergütung",
+                    "Erforderlicher Aufwand könnte im Angebot unberücksichtigt bleiben.",
+                ),
             }.get(finding.kind, ("Widerspruch", "Siehe Begründung des Modellvorschlags."))
             records.append(
                 {
@@ -197,9 +209,15 @@ def review_pdf(
                     "assessment": assessment,
                     "method": method,
                     "category": category,
-                    "evidence": "Zwei Textstellen; Anwendbarkeit offen"
-                    if finding.status != "conflict"
-                    else "Zwei Textstellen belegt",
+                    "evidence": (
+                        "Ausdrücklich offene Angabe belegt"
+                        if len(finding.passages) == 1
+                        else (
+                            "Zwei Textstellen; Anwendbarkeit offen"
+                            if finding.status != "conflict"
+                            else "Zwei Textstellen belegt"
+                        )
+                    ),
                     "impact": impact,
                     "explanation": finding.explanation,
                     "question": finding.question,
@@ -222,12 +240,14 @@ def review_pdf(
                 finding.explanation,
                 "",
             ]
-            for passage, other in (finding.passages, finding.passages[::-1]):
-                comment = (
-                    f"{identifier} · {assessment}\n"
-                    f"Gegenstelle: {_reference(other)}\n"
-                    f"„{_excerpt(other)}“\n\n{finding.explanation}"
-                )
+            for index, passage in enumerate(finding.passages):
+                comment = f"{identifier} · {assessment}\n"
+                if len(finding.passages) == 2:
+                    other = finding.passages[1 - index]
+                    comment += f"Gegenstelle: {_reference(other)}\n„{_excerpt(other)}“\n\n"
+                comment += finding.explanation
+                if len(finding.passages) == 1 and finding.question:
+                    comment += f"\n\nBieterfrage: {finding.question}"
                 page = passage[0].page
                 count = annotate(document[page], passage, identifier, comment)
                 for subtype in ("Highlight", "Text")[:count]:
@@ -254,8 +274,8 @@ def review_pdf(
             "",
             f"**PDF-Seiten mit Text:** {len(pages) - len(skipped)}/{len(pages)}",
             f"**Kandidaten:** {len(findings)}",
-            "**Prüfungen:** Verweise in Zeichnungspositionen und Körnungsgrenzen "
-            f"für Schachtvierungen. **Semantische Modellprüfung:** {coverage}.",
+            "**Prüfungen:** Zeichnungsverweise, Körnungsgrenzen für Schachtvierungen "
+            f"und ausdrücklich offene Angaben. **Semantische Modellprüfung:** {coverage}.",
             "",
         ]
         if semantic is not None:

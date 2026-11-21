@@ -12,6 +12,10 @@ BoQ data model. Checks, the risk report and the upload page do not exist yet.
 
 ## Local PDF contradiction review
 
+The PDF checks also flag explicitly open specifications and compensation terms when the
+surrounding LV does not resolve them. Findings include the relevant OZ and a German
+Bieterfrage. A missing separate line item does not trigger this check.
+
 Start the web prototype without a model:
 
 ```powershell

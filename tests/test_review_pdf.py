@@ -87,3 +87,54 @@ def test_invalid_input_does_not_publish(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="PDF"):
         review_pdf("bad.pdf", b"not a PDF", output)
     assert not output.exists()
+
+
+def test_explicit_open_scope_and_pricing_are_annotated(tmp_path: Path) -> None:
+    """Export evidence and German questions for open specification and pricing.
+
+    :param tmp_path: isolated artifact directory.
+    """
+    with pymupdf.open() as document:
+        page = document.new_page()
+        page.insert_text((72, 72), "1.2.10. Schutzestrich")
+        page.insert_text((72, 98), "Schutzestrich herstellen.")
+        page.insert_text((72, 124), "Schichtdicke: nach Absprache")
+        page.insert_text((72, 150), "Vergütung: noch offen")
+        result = review_pdf("open-terms.pdf", document.tobytes(), tmp_path / "run")
+
+    assert {finding["rule"] for finding in result["findings"]} == {"open_scope", "open_pricing"}
+    for finding in result["findings"]:
+        assert len(finding["sources"]) == 1 and "OZ 1.2.10" in finding["question"]
+    with pymupdf.open(result["annotated_pdf"]) as reviewed:
+        page = reviewed[0]
+        marks = [
+            annot.info["content"] for annot in page.annots(types=[pymupdf.PDF_ANNOT_HIGHLIGHT])
+        ]
+        assert len(marks) == 2
+        assert all("Bieterfrage" in comment and "Gegenstelle" not in comment for comment in marks)
+
+
+def test_scope_questions_use_adjacent_and_general_conditions(tmp_path: Path) -> None:
+    """Suppress questions already answered in applicable source context.
+
+    :param tmp_path: isolated artifact directory.
+    """
+    lines = (
+        "Für die OZ 1.2.10: Lieferverantwortung: Auftragnehmer",
+        "1.2.10. Schutzestrich",
+        "Schutzestrich herstellen, Verankerungen liefern.",
+        "Schichtdicke: nach Absprache",
+        "Lieferverantwortung: noch offen",
+        "Vergütung: offen",
+        "Verankerungen sind im Einheitspreis enthalten.",
+        "1.2.20. Schutzestrich",
+        "Schichtdicke: 45 mm",
+        "1.2.30. Geländer",
+        "Geländer montieren, Schrauben und Dübel einschliesslich.",
+    )
+    with pymupdf.open() as document:
+        page = document.new_page()
+        for index, line in enumerate(lines):
+            page.insert_text((72, 72 + index * 27), line)
+        result = review_pdf("included-scope.pdf", document.tobytes(), tmp_path / "run")
+    assert result["findings"] == []

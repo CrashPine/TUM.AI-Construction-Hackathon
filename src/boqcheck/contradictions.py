@@ -16,17 +16,17 @@ _GRAIN = re.compile(r"Körnung\s+bis\s+höchstens\s+(\d+(?:[,.]\d+)?)\s*mm\b", r
 
 @dataclass(frozen=True)
 class Finding:
-    """A candidate supported by two passages.
+    """A candidate supported by source passages.
 
     :ivar kind: deterministic check identifier.
-    :ivar passages: two source excerpts, each with one or more source lines.
+    :ivar passages: source excerpts, each with one or more source lines.
     :ivar explanation: German explanation of the discrepancy and its uncertainty.
     :ivar question: proposed German Bieterfrage.
     :ivar status: conflict or needs_scope_check.
     """
 
     kind: str
-    passages: tuple[tuple[Line, ...], tuple[Line, ...]]
+    passages: tuple[tuple[Line, ...], ...]
     explanation: str
     question: str
     status: str = "needs_scope_check"
