@@ -46,3 +46,13 @@ Model: local bonsai-2:27b. The roof case was missed despite full text coverage.
 The short shaft run did not supply both passages, so it measures coverage rather
 than detection. No new false positives were observed in these runs. This small
 sample is not a corpus-wide precision or recall estimate.
+### Scope prompt calibration
+
+With each known pair supplied in one focused request, the previous prompt returned
+zero candidates for both pairs. The updated prompt with local bonsai-2:27b returned
+the shaft aggregate discrepancy with valid quotes (8 mm vs 15 mm). A 90-second
+parallel attempt timed out for the shaft; the sequential retry with a 150-second
+timeout succeeded. The explanation was in English. The roof case still returned
+zero candidates, and the complete exterior waterproofing control returned none.
+This checks classification given selected evidence. End-to-end retrieval of a
+new real case remains open.
