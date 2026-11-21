@@ -22,6 +22,7 @@ from .history_jobs import (
     save_batch,
     save_review,
 )
+from .history_report import HistoryDataset, load_dataset, report_history
 from .review_pdf import review_pdf
 from .semantic import SemanticConfig
 from .spelling import load_lexicon
@@ -142,7 +143,9 @@ def _analyse(
         ), None
     if suffix == ".xlsx":
         data = _read_body(env, _MAX_UPLOAD, media_type="application/octet-stream")
-        return review_positions(*read_xlsx(name, data)), None
+        result = review_positions(*read_xlsx(name, data))
+        result["document_hash"] = sha256(data).hexdigest()
+        return result, None
     raise ValueError("Unterstützt werden PDF, GAEB und XLSX.")
 
 
@@ -248,13 +251,18 @@ def _resume(
 
 
 def make_app(
-    directory: Path, *, history_db: Path | None = None, semantic: SemanticConfig | None = None
+    directory: Path,
+    *,
+    history_db: Path | None = None,
+    semantic: SemanticConfig | None = None,
+    dataset: HistoryDataset | None = None,
 ) -> Callable:
     """Build the single-process WSGI application.
 
     :param directory: temporary root for generated artifacts.
     :param history_db: SQLite database that persists beyond the server lifetime.
     :param semantic: optional local model available for PDF uploads.
+    :param dataset: optional explicitly mapped local historical observations.
     :returns: WSGI application with per-run in-memory state.
     """
     runs: dict[str, tuple[str, dict]] = {}
@@ -289,6 +297,14 @@ def make_app(
                 trade = query.get("trade", [""])[0].strip()[:120]
                 templates = model_patterns(history_db, trade) if history_db else []
                 result, original = _analyse(env, name, directory / identifier, selected, templates)
+                if (
+                    dataset
+                    and name == dataset.filename
+                    and "positions" in result
+                    and result.get("document_hash") == dataset.sha256
+                ):
+                    result["historical_comparisons"] = report_history(dataset, result["positions"])
+                    result["synthetic_history"] = dataset.synthetic
                 if history_db is not None:
                     _apply_history(history_db, result, trade)
                 for finding in result["findings"]:
@@ -395,12 +411,14 @@ def main() -> None:
         "--spelling", action="store_true", help="check German spelling with the model"
     )
     parser.add_argument("--lexicon", type=Path, help="local project terms, one per line")
+    parser.add_argument("--historical-dataset", type=Path)
     args = parser.parse_args()
     if bool(args.endpoint) != bool(args.model) or args.max_requests < 1 or not args.timeout > 0:
         parser.error("provide --endpoint and --model together and positive comparison limits")
     if (args.spelling or args.lexicon) and not args.endpoint:
         parser.error("spelling and lexicon require a configured local model")
     try:
+        dataset = load_dataset(args.historical_dataset) if args.historical_dataset else None
         lexicon = load_lexicon(args.lexicon) if args.lexicon else frozenset()
     except (ValueError, OSError) as error:
         parser.error(str(error))
@@ -417,7 +435,9 @@ def main() -> None:
         else None
     )
     with TemporaryDirectory(prefix="bidguard-") as temporary:
-        application = make_app(Path(temporary), history_db=args.history_db, semantic=semantic)
+        application = make_app(
+            Path(temporary), history_db=args.history_db, semantic=semantic, dataset=dataset
+        )
         with make_server("127.0.0.1", args.port, application) as server:
             print(f"BidGuard AI · http://127.0.0.1:{server.server_port}", flush=True)
             try:

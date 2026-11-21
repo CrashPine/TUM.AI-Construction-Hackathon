@@ -4,6 +4,7 @@ import json
 import re
 from collections.abc import Callable
 from contextlib import closing
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 from sqlite3 import connect
@@ -19,6 +20,7 @@ from openpyxl import Workbook
 from boqcheck import semantic
 from boqcheck.docx_context import read_context
 from boqcheck.history import initialize, promote, replay
+from boqcheck.history_report import load_dataset
 from boqcheck.web import make_app
 from boqcheck.web_gaeb import review_legacy
 
@@ -868,3 +870,61 @@ def test_xlsx_sheet_row_report(tmp_path: Path) -> None:
     assert "Blatt Dach · Zeile 2" in report and "Blatt Dach · Zeile 4" in report
     assert "20.00" in report and "19.99" in report and "=1+1" in report
     assert "Blatt Hinweise" in report
+
+
+def test_historical_comparison_export(tmp_path: Path) -> None:
+    """Verify both anomaly types, evidence and document identity in the report.
+
+    :param tmp_path: isolated dataset and review storage.
+    """
+    book = Workbook()
+    book.active.append(["OZ", "Kurztext", "Menge", "ME", "EP", "Preisbasis"])
+    book.active.append(["01", "Dach", 200, "m2", 3000, 100])
+    data = BytesIO()
+    book.save(data)
+    workbook = data.getvalue()
+    metadata = dict(
+        project="current",
+        source="Dach 2",
+        trade="roof",
+        scope="deck",
+        unit="m2",
+        scale=100,
+        scale_unit="m2 roof",
+        price_basis=100,
+        currency="EUR",
+        price_type="net",
+        market="demo",
+        price_period="2026-Q4",
+    )
+    path = tmp_path / "history.json"
+    dataset = dict(
+        filename="demo.xlsx",
+        sha256=sha256(workbook).hexdigest(),
+        synthetic=True,
+        current={"01": metadata},
+        peers=[
+            dict(metadata, project=f"demo-{i}", source=f"Sheet {i}", quantity=100, price=1000)
+            for i in range(3)
+        ],
+    )
+    path.write_text(json.dumps(dataset), "utf8")
+    for insufficient in (False, True):
+        if insufficient:
+            dataset["peers"].pop()
+            path.write_text(json.dumps(dataset), "utf8")
+        app = make_app(tmp_path, dataset=load_dataset(path))
+        _, headers, _ = _request(
+            app, "/upload?name=demo.xlsx", workbook, "application/octet-stream"
+        )
+        report = _request(app, headers["Location"] + "/report?download=1")[2].decode()
+        assert "Synthetische Beispieldaten" in report and "Sheet 1" in report
+        if insufficient:
+            assert report.count("Zu wenige Vergleichsprojekte") == 2
+        else:
+            assert report.count("Auffällig") == 2 and "Median:" in report
+    _, headers, _ = _request(
+        app, "/upload?name=demo.xlsx", workbook + b"changed", "application/octet-stream"
+    )
+    report = _request(app, headers["Location"] + "/report")[2].decode()
+    assert "Synthetische Beispieldaten" not in report
