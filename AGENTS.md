@@ -65,11 +65,20 @@ files without `21` records (`StBALV23040.D84`). All parsers return the model in 
 - Prices are `Decimal` or `None`: `Item.unit_price`, `Item.total`, `Section.total` and `BoQ.total`
   (net grand total). Only GAEB 90 files fill them; a blank or zero grand total gives `None`.
 
+`check_calculations(boq)` in `src/boqcheck/calculation.py` checks the prices: each item total is
+quantity × unit price rounded half up to cents, and each section total and the grand total is the
+sum of its item totals. It returns `CalculationFinding`s with status `mismatch` or `inconclusive`
+and a German explanation; a mismatch lists the OZs missing from the item sequence. A result is
+inconclusive, not a mismatch, if an operand or an item total is missing, if a sum covers a
+Bedarfsposition (provisional item), if a Bedarfsposition states a zero total, or if a section
+states a total of 0 while its items sum to more. No sample has a
+priced Bedarfsposition, so its pricing rules are not known.
+
 ## Repository map
 
 | Path | Content |
 |---|---|
-| `src/boqcheck/` | the package: data model (`model.py`), GAEB DA XML parser (`gaeb_xml.py`), GAEB 90 parser (`gaeb90.py`), `parse()` in `__init__.py` |
+| `src/boqcheck/` | the package: data model (`model.py`), GAEB DA XML parser (`gaeb_xml.py`), GAEB 90 parser (`gaeb90.py`), calculation check (`calculation.py`), `parse()` in `__init__.py` |
 | `tests/` | pytest tests; they read the sample files in `data/raw/` |
 | `pyproject.toml`, `uv.lock`, `.python-version` | project, dev tools and their settings; locked versions |
 | `data/raw/` | the organizers' 44 sample files, unchanged; read-only |
