@@ -243,3 +243,8 @@ path inside the manifest directory), and `positions` (object keyed by historical
 Use `defaults` for common metadata and per-position objects for overrides. Numbers,
 units and descriptions come from the workbook. Reports cite the workbook, sheet
 and physical row. Inline `peers` may still be supplied independently.
+For a project-level shortlist before position matching, set `current_profile`
+to a project summary and `project_profiles` to an object mapping historical
+project IDs to their summaries. This requires `embedding_model`. Only projects
+with a supplied profile can enter the shortlist. The report shows coverage of
+both search stages.

@@ -74,5 +74,6 @@ verification.
 - [x] Load a mapped local historical dataset and export quantity and price findings, peer sources and insufficient-evidence coverage. Verified on synthetic XLSX.
 - [x] Optionally filter metadata-compatible positions by local Ollama embeddings. Verified with synthetic vectors and an unavailable service.
 - [x] Import historical XLSX rows through an explicit local manifest, with workbook, sheet and row evidence.
-- [ ] Add project-level shortlisting and evaluate retrieval on real comparable projects.
+- [x] Shortlist projects by supplied summaries using local embeddings before matching positions.
+- [ ] Evaluate both retrieval stages on real comparable projects with an installed embedding model.
 - [ ] Add the separate legal retrieval demo after the core workflow.
