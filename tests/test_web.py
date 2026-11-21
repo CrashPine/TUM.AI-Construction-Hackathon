@@ -5,12 +5,14 @@ from contextlib import closing
 from io import BytesIO
 from pathlib import Path
 from sqlite3 import connect
+from urllib.error import URLError
 from urllib.parse import urlencode
 from wsgiref.util import setup_testing_defaults
 
 import pymupdf
 import pytest
 
+from boqcheck import semantic
 from boqcheck.history import initialize, promote, replay
 from boqcheck.web import make_app
 
@@ -201,3 +203,43 @@ def test_history_priority_and_coverage(tmp_path: Path) -> None:
     assert {entry["status"] for entry in replay(db, {"findings": [], "gaeb": {}})} == {
         "inapplicable"
     }
+
+
+def test_optional_web_model_keeps_roof_rule_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only call the model for opted-in uploads and preserve the rule on a network error.
+
+    :param tmp_path: isolated artifact directory.
+    :param monkeypatch: fixture for replacing the inference transport.
+    """
+    config = semantic.SemanticConfig("http://127.0.0.1:44445/api/chat", "bonsai-2:27b")
+    calls = []
+
+    def unavailable(selected: semantic.SemanticConfig, payload: dict) -> list:
+        """Record an attempted comparison and simulate an unavailable local model.
+
+        :param selected: requested model configuration.
+        :param payload: source passages that would go to the model.
+        :returns: no result, because the local model is unavailable.
+        :raises URLError: always, to exercise web fallback.
+        """
+        assert payload["left"]
+        calls.append(selected)
+        raise URLError("offline")
+
+    monkeypatch.setattr(semantic, "_request", unavailable)
+    app = make_app(tmp_path, semantic=config)
+    assert b'id="semantic"' in _request(app, "/")[2]
+    upload = f"/upload?name={_ROOF.name}"
+    data = _ROOF.read_bytes()
+    _request(app, upload, data, "application/pdf")
+    assert not calls
+    status, headers, _ = _request(app, upload + "&semantic=1", data, "application/pdf")
+    assert status.startswith("303") and calls == [config]
+    run = headers["Location"]
+    for path in (run, run + "/report"):
+        page = _request(app, path)[2].decode()
+        assert "Lokales Modell: bonsai-2:27b" in page and "nicht verfügbar" in page
+        assert "OZ 9.2.3" in page and "OZ 9.2.4" in page
+    assert _request(app, run + "/pdf")[2].startswith(b"%PDF")

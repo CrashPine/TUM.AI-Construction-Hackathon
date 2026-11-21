@@ -28,6 +28,16 @@ The same upload form accepts GAEB X83 (3.1 or 3.2). It shows normalized position
 findings and price-check coverage and exports the shared HTML report. GAEB 90, DOCX and XLSX
 are currently unsupported.
 
+To make local Ollama available for PDF uploads, start the server with:
+
+```powershell
+uv run python -m boqcheck.web --endpoint http://127.0.0.1:44445/api/chat --model bonsai-2:27b --timeout 180
+```
+
+Select the model checkbox on a PDF upload to use it for that run. Without the checkbox the
+existing rules run on their own. The report records model coverage or unavailability.
+The web server defaults to six model comparisons per upload (override with `--max-requests`).
+
 Review state and generated files are available for the lifetime of the local server. Download
 the report, annotated PDF or log before stopping it. To retain a confirmed PDF rule case,
 select its history checkbox and enter a reviewer identifier before saving. Confirmed cases

@@ -13,6 +13,7 @@ from wsgiref.simple_server import make_server
 
 from .history import RULES, SEVERITIES, initialize, promote, replay
 from .review_pdf import review_pdf
+from .semantic import SemanticConfig
 from .web_gaeb import review_x83
 from .web_views import STATUSES, review_view, upload_view
 
@@ -72,19 +73,22 @@ def _update(
         finding.update(review_status=status, question=question)
 
 
-def _analyse(env: dict, name: str, output: Path) -> dict:
+def _analyse(env: dict, name: str, output: Path, semantic: SemanticConfig | None) -> dict:
     """Dispatch the upload to its analyzer using the original filename.
 
     :param env: WSGI request environment.
     :param name: uploaded filename.
     :param output: path for PDF output files.
+    :param semantic: optional model configuration for this upload.
     :returns: structured review result.
     :raises ValueError: if the suffix is unsupported.
     """
     suffix = Path(name).suffix.lower()
     if suffix == ".pdf":
         data = _read_body(env, _MAX_UPLOAD, media_type="application/pdf")
-        result = review_pdf(name, data, output)
+        result = review_pdf(name, data, output, semantic=semantic)
+        if semantic is not None:
+            result["semantic_model"] = semantic.model
         result["document_hash"] = sha256(data).hexdigest()
         return result
     if suffix == ".x83":
@@ -92,11 +96,14 @@ def _analyse(env: dict, name: str, output: Path) -> dict:
     raise ValueError("Unterstützt werden PDF und GAEB X83.")
 
 
-def make_app(directory: Path, *, history_db: Path | None = None) -> Callable:
+def make_app(
+    directory: Path, *, history_db: Path | None = None, semantic: SemanticConfig | None = None
+) -> Callable:
     """Build the single-process WSGI application.
 
     :param directory: temporary root for generated artifacts.
     :param history_db: SQLite database that persists beyond the server lifetime.
+    :param semantic: optional local model available for PDF uploads.
     :returns: WSGI application with per-run in-memory state.
     """
     runs: dict[str, tuple[str, dict]] = {}
@@ -120,11 +127,12 @@ def make_app(directory: Path, *, history_db: Path | None = None) -> Callable:
 
         try:
             if method == "GET" and path == "/":
-                body = upload_view()
+                body = upload_view(semantic.model if semantic else None)
             elif method == "POST" and path == "/upload":
                 name = query.get("name", ["upload.pdf"])[0][:200]
                 identifier = uuid4().hex
-                result = _analyse(env, name, directory / identifier)
+                selected = semantic if query.get("semantic") == ["1"] else None
+                result = _analyse(env, name, directory / identifier, selected)
                 if history_db is not None:
                     result["history"] = replay(history_db, result)
                     matched = {
@@ -198,9 +206,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--history-db", type=Path, default=Path("bidguard-history.sqlite3"))
+    parser.add_argument("--model", help="optional local model name")
+    parser.add_argument("--endpoint", help="loopback Ollama or chat completions URL")
+    parser.add_argument("--max-requests", type=int, default=6)
+    parser.add_argument("--timeout", type=float, default=90, help="seconds per model comparison")
     args = parser.parse_args()
+    if bool(args.endpoint) != bool(args.model) or args.max_requests < 1 or not args.timeout > 0:
+        parser.error("provide --endpoint and --model together and positive comparison limits")
+    semantic = (
+        SemanticConfig(args.endpoint, args.model, args.max_requests, args.timeout)
+        if args.endpoint
+        else None
+    )
     with TemporaryDirectory(prefix="bidguard-") as temporary:
-        application = make_app(Path(temporary), history_db=args.history_db)
+        application = make_app(Path(temporary), history_db=args.history_db, semantic=semantic)
         with make_server("127.0.0.1", args.port, application) as server:
             print(f"BidGuard AI · http://127.0.0.1:{server.server_port}", flush=True)
             try:

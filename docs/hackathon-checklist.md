@@ -29,7 +29,8 @@ verification.
 
 ## Additional analysis and formats
 
-- [ ] Expose optional local model configuration on the web workflow; retain the no-model baseline.
+- [x] Expose optional local model configuration on the web workflow. PDF uploads opt in per run;
+  the report shows coverage and the rule-only result remains available on model failure.
 - [x] Persist explicitly promoted, confirmed PDF rule cases in SQLite with source evidence and
   reviewer provenance. Deduplicate patterns and repeated promotions. Show empty-history coverage
   and match saved PDF rules against new uploads in stable priority order.

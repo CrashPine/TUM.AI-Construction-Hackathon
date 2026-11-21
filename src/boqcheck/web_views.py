@@ -49,21 +49,29 @@ _UPLOAD = """
   <label for="lv">Leistungsverzeichnis als PDF oder GAEB X83</label>
   <input id="lv" type="file" accept=".pdf,.x83,application/pdf" required>
   <p class="badge">GAEB 90, DOCX und XLSX werden derzeit nicht unterstützt.</p>
+  <!--model-option-->
   <div class="actions"><button>Datei prüfen</button></div>
   <p id="progress" role="status"></p>
 </form>
 <script>
 const form = document.querySelector('#upload');
+const input = document.querySelector('#lv');
+const model = document.querySelector('#semantic');
+input.addEventListener('change', () => {
+  if (model) model.disabled = !input.files[0]?.name.toLowerCase().endsWith('.pdf');
+});
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const file = document.querySelector('#lv').files[0];
+  const file = input.files[0];
   const type = file.name.toLowerCase().endsWith('.x83') ? 'application/xml' : 'application/pdf';
   const status = document.querySelector('#progress');
   const button = form.querySelector('button');
   button.disabled = true;
   status.textContent = 'Datei wird geprüft …';
   try {
-    const response = await fetch('/upload?name=' + encodeURIComponent(file.name), {
+    const query = new URLSearchParams({name: file.name});
+    if (model?.checked && !model.disabled) query.set('semantic', '1');
+    const response = await fetch('/upload?' + query, {
       method: 'POST', headers: {'Content-Type': type}, body: file
     });
     if (!response.ok) throw new Error(await response.text());
@@ -93,12 +101,19 @@ def _page(title: str, content: str) -> str:
     )
 
 
-def upload_view() -> str:
+def upload_view(model: str | None = None) -> str:
     """Render the single-file upload page.
 
+    :param model: local model name, when available.
     :returns: complete upload view.
     """
-    return _page("LV prüfen", _UPLOAD)
+    option = (
+        f'<label><input type="checkbox" id="semantic" disabled> '
+        f"Lokales Modell für PDF verwenden ({escape(model)})</label>"
+        if model
+        else ""
+    )
+    return _page("LV prüfen", _UPLOAD.replace("<!--model-option-->", option))
 
 
 def _finding(base: str, finding: dict, report: bool, history: bool) -> str:
@@ -229,6 +244,8 @@ def review_view(
         if gaeb["arithmetic_checked"] == gaeb["arithmetic_skipped"] == 0:
             content.append("<p>Keine Preisangaben. Für X83 ist das zulässig.</p>")
     else:
+        if model := result.get("semantic_model"):
+            content.append(f'<p class="badge">Lokales Modell: {escape(model)}</p>')
         content.append(f'<p class="badge">Modellprüfung: {escape(result["semantic_coverage"])}</p>')
     if result["warnings"]:
         content.append(
