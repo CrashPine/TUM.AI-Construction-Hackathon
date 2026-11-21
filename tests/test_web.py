@@ -400,6 +400,54 @@ def test_docx_attachment(tmp_path: Path) -> None:
     assert "Welche Leistung gilt?" in report
 
 
+@pytest.mark.parametrize(
+    ("spec", "component", "checks", "outcome"),
+    [
+        ("offen", "Dachplatte", 1, "Durch Anlage geklärt"),
+        ("10 mm", "Dachplatte", 1, "Abweichung zwischen LV und Anlage"),
+        ("2 cm", "Dachplatte", 1, ""),
+        ("10 mm", "Fassade", 0, ""),
+    ],
+)
+def test_pdf_attachment_comparison(
+    tmp_path: Path, spec: str, component: str, checks: int, outcome: str
+) -> None:
+    """Verify clarification, conflict, equivalent units and different components via uploads.
+
+    :param tmp_path: isolated review storage.
+    :param spec: source PDF thickness.
+    :param component: DOCX position title.
+    :param checks: number of grounded comparisons.
+    :param outcome: expected finding label, or empty for no finding.
+    """
+    with pymupdf.open() as pdf:
+        pdf.new_page().insert_text((50, 50), f"01.01.0010. Dachplatte\nDicke: {spec}")
+        source = pdf.tobytes()
+    data = BytesIO()
+    with ZipFile(data, "w") as archive:
+        archive.writestr(
+            "word/document.xml",
+            f"""
+          <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+          <w:p><w:r><w:t>OZ 01.01.0010 {component}</w:t></w:r></w:p>
+          <w:p><w:r><w:t>Dicke: 20 mm</w:t></w:r></w:p></w:body></w:document>""",
+        )
+    app = make_app(tmp_path)
+    run = _request(app, "/upload?name=LV.pdf", source, "application/pdf")[1]["Location"]
+    assert _request(
+        app, run + "/attachment?name=Details.docx", data.getvalue(), "application/octet-stream"
+    )[0].startswith("303")
+    report = _request(app, run + "/report?download=1")[2].decode()
+    assert f"{checks} eindeutig zugeordnete" in report
+    if outcome:
+        assert outcome in report and f"Dicke: {spec}" in report
+        assert "Details.docx · Absatz 2" in report and "Dicke: 20 mm" in report
+        if spec == "offen":
+            assert "Keine Bieterfragen" in report
+    else:
+        assert "Keine aktiven Befunde" in report
+
+
 def test_docx_cell_and_heading_order() -> None:
     """Keep a styled heading, two table cells and the next paragraph in source order."""
     data = BytesIO()

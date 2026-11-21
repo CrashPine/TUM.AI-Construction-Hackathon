@@ -11,6 +11,7 @@ from urllib.parse import parse_qs
 from uuid import uuid4
 from wsgiref.simple_server import make_server
 
+from .attachment_scope import compare_attachment
 from .docx_context import read_context
 from .history import RULES, SEVERITIES, initialize, model_patterns, promote, replay
 from .history_jobs import (
@@ -103,6 +104,8 @@ def _update(
             raise ValueError("Bitte Prüfer und gültige Priorität für die Historie angeben.")
         promote(history_db, source, result["document_hash"], reviewer, trade, severity, cases)
     for finding, status, question, correction, citation in changes:
+        if question != finding["question"] or status != finding["review_status"]:
+            finding["review_edited"] = True
         finding.update(review_status=status, question=question)
         finding["citation"] = citation
         if "correction" in finding:
@@ -156,10 +159,9 @@ def _attach(env: dict, filename: str, result: dict) -> dict:
         if prior["digest"] != digest:
             raise ValueError("Diese Prüfung enthält bereits eine DOCX-Anlage.")
         return result
-    return {
-        **result,
-        "attachment": {"name": filename, "digest": digest, "entries": read_context(data)},
-    }
+    return compare_attachment(
+        result, {"name": filename, "digest": digest, "entries": read_context(data)}
+    )
 
 
 def _apply_history(path: Path, result: dict, trade: str) -> None:
@@ -225,12 +227,13 @@ def _resume(
     _apply_history(path, result, previous["history_trade"])
     saved = {finding["id"]: finding for finding in previous["findings"]}
     if "attachment" in previous:
-        result["attachment"] = previous["attachment"]
+        result = compare_attachment(result, previous["attachment"])
     for finding in result["findings"]:
         old = saved.get(finding["id"])
         if old and old["sources"] == finding["sources"]:
             finding.update(question=old["question"], review_status=old["review_status"])
             finding["citation"] = old.get("citation", "")
+            finding["review_edited"] = old.get("review_edited", False)
             if "correction" in old and "correction" in finding:
                 finding["correction"] = old["correction"]
         else:
