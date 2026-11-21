@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from email.message import Message
 from heapq import nlargest
-from itertools import combinations, groupby
+from itertools import chain, combinations, groupby
 from typing import BinaryIO
 from urllib.error import URLError
 from urllib.parse import urlsplit
@@ -266,20 +266,31 @@ def _request(config: SemanticConfig, payload: dict) -> list:
 
 
 def semantic_review(
-    pages: list[list[Line]], config: SemanticConfig, *, condition: str = ""
+    pages: list[list[Line]],
+    config: SemanticConfig,
+    *,
+    condition: str = "",
+    focus: tuple[Finding, ...] = (),
 ) -> tuple[list[Finding], list[str], str]:
     """Compare excerpts and accept only evidence grounded in the input.
 
     :param pages: extracted source lines by page.
     :param config: inference connection and review budget.
     :param condition: optional reviewer-authored condition for a historical pattern.
+    :param focus: deterministic candidates to verify before general comparisons.
     :returns: grounded candidates, coverage warnings and comparison summary.
     """
     sources = {f"L{i}": line for i, line in enumerate((line for p in pages for line in p), 1)}
     windows = _windows(sources)
     prices = {} if condition else price_groups(sources)
     verified_prices: set[str] = set()
-    total = len(windows) * (len(windows) + 1) // 2
+    line_ids = {id(line): key for key, line in sources.items()}
+    focused = [
+        ([line_ids[id(line)] for passage in finding.passages for line in passage], [])
+        for finding in focus
+        if finding.kind in ("aggregate_limit", "scope_reference")
+    ][: min(config.max_requests, 1)]
+    total = len(focused) + len(windows) * (len(windows) + 1) // 2
     findings = []
     warnings = []
     spell = None
@@ -293,7 +304,9 @@ def semantic_review(
     checked: set[str] = set()
     completed = rejected = 0
 
-    for index, (left, right) in enumerate(_comparisons(windows, sources, config.max_requests)):
+    remaining = config.max_requests - len(focused)
+    scheduled = chain(focused, _comparisons(windows, sources, remaining))
+    for index, (left, right) in enumerate(scheduled):
         if index >= config.max_requests:
             break
         payload = {

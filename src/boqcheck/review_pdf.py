@@ -50,6 +50,7 @@ def _model_batch(
     semantic: SemanticConfig | None,
     templates: list[dict],
     checkpoint: dict | None,
+    focus: tuple[Finding, ...],
 ) -> tuple[list[tuple[str, Finding]], dict]:
     """Compute one batch and retain model decisions by source-line index.
 
@@ -57,6 +58,7 @@ def _model_batch(
     :param semantic: model available for this batch.
     :param templates: ordered snapshot of applicable historical templates.
     :param checkpoint: previous completed batch data, when resuming.
+    :param focus: deterministic findings for prioritized model verification.
     :returns: accumulated candidates and a JSON-serializable checkpoint.
     """
     if checkpoint is None:
@@ -80,7 +82,9 @@ def _model_batch(
     if checkpoint is None and semantic is not None:
         if used < semantic.max_requests:
             config = replace(semantic, max_requests=semantic.max_requests - used)
-            general, state["warnings"], state["coverage"] = semantic_review(pages, config)
+            general, state["warnings"], state["coverage"] = semantic_review(
+                pages, config, focus=focus
+            )
             pending.extend(("", finding) for finding in general)
         else:
             state["coverage"] = "allgemeine Prüfung zurückgestellt"
@@ -152,7 +156,7 @@ def review_pdf(
         warnings = [f"PDF-Seite {page}: kein extrahierbarer Text (keine OCR)." for page in skipped]
         table_findings, table_coverage = table_prices(pages)
         findings.extend(table_findings)
-        pending, state = _model_batch(pages, semantic, templates or [], checkpoint)
+        pending, state = _model_batch(pages, semantic, templates or [], checkpoint, tuple(findings))
         model_history = state["outcomes"]
         warnings.extend(state["warnings"])
         coverage = state["coverage"] + ". " + table_coverage
@@ -161,6 +165,7 @@ def review_pdf(
         if any(status in ("inconclusive", "deferred") for status, _ in model_history.values()):
             warnings.append("Historische Modellprüfung teilweise offen; siehe Regelstatus.")
         origins: dict[int, list[str]] = {}
+        model_matches: set[int] = set()
         for pattern, candidate in pending:
             if candidate.spelling or candidate.kind == "calculation":
                 findings.append(candidate)
@@ -181,6 +186,8 @@ def review_pdf(
             if existing is None:
                 existing = candidate
                 findings.append(candidate)
+            elif not pattern and existing.kind != "semantic":
+                model_matches.add(id(existing))
             if pattern:
                 origins.setdefault(id(existing), []).append(pattern)
         details = []
@@ -192,6 +199,8 @@ def review_pdf(
                 "Widerspruchskandidat" if finding.status == "conflict" else "Klärungsbedarf"
             )
             method = "Semantische Modellprüfung" if finding.kind == "semantic" else "Regelprüfung"
+            if id(finding) in model_matches:
+                method += " · Modellbefund an denselben Quellen"
             if finding.spelling:
                 assessment = "Möglicher Schreibfehler"
                 method = "Modellvorschlag mit lokalem Wortabgleich"
