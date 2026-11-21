@@ -14,6 +14,7 @@ from .contradictions import Finding, find_contradictions, rule_scope
 from .history import review_model_patterns
 from .pdf_annotate import annotate
 from .pdf_extract import Line, extract
+from .price_table import table_prices
 from .scope import find_scope_questions
 from .semantic import SemanticConfig, semantic_review
 from .spelling import load_lexicon
@@ -148,17 +149,19 @@ def review_pdf(
         pages, skipped = extract(document)
         findings = find_contradictions(pages) + find_scope_questions(pages)
         warnings = [f"PDF-Seite {page}: kein extrahierbarer Text (keine OCR)." for page in skipped]
+        table_findings, table_coverage = table_prices(pages)
+        findings.extend(table_findings)
         pending, state = _model_batch(pages, semantic, templates or [], checkpoint)
         model_history = state["outcomes"]
         warnings.extend(state["warnings"])
-        coverage = state["coverage"]
+        coverage = state["coverage"] + ". " + table_coverage
         if state["attempts"]:
             coverage += f"; {state['attempts']} historische Vergleiche versucht"
         if any(status in ("inconclusive", "deferred") for status, _ in model_history.values()):
             warnings.append("Historische Modellprüfung teilweise offen; siehe Regelstatus.")
         origins: dict[int, list[str]] = {}
         for pattern, candidate in pending:
-            if candidate.spelling:
+            if candidate.spelling or candidate.kind == "calculation":
                 findings.append(candidate)
                 continue
             left, right = candidate.passages
@@ -191,6 +194,11 @@ def review_pdf(
             if finding.spelling:
                 assessment = "Möglicher Schreibfehler"
                 method = "Modellvorschlag mit lokalem Wortabgleich"
+            if finding.kind == "calculation":
+                assessment = "Rechenabweichung"
+                method = "Modellformel mit lokaler Decimal-Prüfung"
+            if finding.kind == "table_price":
+                assessment = "Rechenabweichung"
             if id(finding) in origins:
                 method += " · Historischer Modell-Treffer"
             category, impact = {
@@ -214,6 +222,8 @@ def review_pdf(
                     "Rechtschreibung",
                     "Die Leistungsbeschreibung könnte missverständlich sein.",
                 ),
+                "table_price": ("Positionsbetrag", "Die Abweichung kann die Angebotssumme ändern."),
+                "calculation": ("Positionsbetrag", "Die Abweichung kann die Angebotssumme ändern."),
             }.get(finding.kind, ("Widerspruch", "Siehe Begründung des Modellvorschlags."))
             records.append(
                 {
@@ -246,6 +256,8 @@ def review_pdf(
                     ],
                 }
             )
+            if finding.kind in ("table_price", "calculation"):
+                records[-1]["evidence"] = "Menge, Preisbasis, Einheitspreis und Gesamtbetrag belegt"
             if finding.spelling:
                 token, correction, start, end = finding.spelling
                 records[-1].update(
