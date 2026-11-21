@@ -30,6 +30,7 @@ with the commands to set up, run, test and lint the project, and with the new fo
 | `data/raw/` | the organizers' 44 sample files, unchanged; read-only |
 | `data/README.md` | inventory: formats, phases, counts, files that hold the same BoQ |
 | `README.md` | challenge, data overview, glossary |
+| `docs/research/` | research reports: known BoQ checks, price sources, supplier RFQ workflow |
 
 ## Data rules
 
