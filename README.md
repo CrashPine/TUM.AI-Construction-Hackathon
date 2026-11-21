@@ -50,6 +50,10 @@ To promote a confirmed model finding, also enter a reusable conflict condition a
 search phrases. On a new PDF upload with the model enabled, historical conditions use up to half
 the comparison budget (rounded up). A replay finding must cite excerpts from the new PDF.
 The report shows conditions that were deferred when the budget ran out.
+Save any edits and choose **Historische Prüfung fortsetzen** to run the next batch. Deferred
+reviews retain the original PDF, completed comparisons, edits and latest exports in SQLite.
+Keep the private review URL to reopen it after restarting the server with the same history
+database and model. The database contains those documents and should stay local.
 
 ### Command-line review
 

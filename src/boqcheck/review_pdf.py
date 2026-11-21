@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 
 import pymupdf
 
-from .contradictions import find_contradictions, rule_scope
+from .contradictions import Finding, find_contradictions, rule_scope
 from .history import review_model_patterns
 from .pdf_annotate import annotate
 from .pdf_extract import Line, extract
@@ -41,6 +41,75 @@ def _excerpt(passage: tuple[Line, ...]) -> str:
     return " ".join(line.text for line in passage)
 
 
+def _model_batch(
+    pages: list[list[Line]],
+    semantic: SemanticConfig | None,
+    templates: list[dict],
+    checkpoint: dict | None,
+) -> tuple[list[tuple[str, Finding]], dict]:
+    """Compute one batch and retain model decisions by source-line index.
+
+    :param pages: extracted lines from the original, unchanged PDF.
+    :param semantic: model available for this batch.
+    :param templates: ordered snapshot of applicable historical templates.
+    :param checkpoint: previous completed batch data, when resuming.
+    :returns: accumulated candidates and a JSON-serializable checkpoint.
+    """
+    if checkpoint is None:
+        state = {
+            "candidates": [],
+            "outcomes": {},
+            "attempts": 0,
+            "coverage": "nicht ausgeführt (kein Modell konfiguriert)",
+            "warnings": [],
+        }
+    else:
+        state = {**checkpoint, "outcomes": dict(checkpoint["outcomes"])}
+        templates = [
+            t for t in templates if state["outcomes"].get(t["rule"], ("deferred",))[0] == "deferred"
+        ]
+    pending, outcomes, used = review_model_patterns(
+        pages, semantic, templates, resuming=checkpoint is not None
+    )
+    state["attempts"] += used
+    state["outcomes"].update(outcomes)
+    if checkpoint is None and semantic is not None:
+        if used < semantic.max_requests:
+            config = replace(semantic, max_requests=semantic.max_requests - used)
+            general, state["warnings"], state["coverage"] = semantic_review(pages, config)
+            pending.extend(("", finding) for finding in general)
+        else:
+            state["coverage"] = "allgemeine Prüfung zurückgestellt"
+
+    indices = {id(line): index for page in pages for index, line in enumerate(page)}
+    previous = [
+        (
+            pattern,
+            Finding(
+                "semantic",
+                tuple(
+                    tuple(pages[page][index] for page, index in passage) for passage in references
+                ),
+                explanation,
+                question,
+                status,
+            ),
+        )
+        for pattern, references, explanation, question, status in state["candidates"]
+    ]
+    state["candidates"] = state["candidates"] + [
+        (
+            pattern,
+            [[(line.page, indices[id(line)]) for line in passage] for passage in finding.passages],
+            finding.explanation,
+            finding.question,
+            finding.status,
+        )
+        for pattern, finding in pending
+    ]
+    return previous + pending, state
+
+
 def review_pdf(
     filename: str,
     pdf_bytes: bytes,
@@ -48,6 +117,7 @@ def review_pdf(
     *,
     semantic: SemanticConfig | None = None,
     templates: list[dict] | None = None,
+    checkpoint: dict | None = None,
 ) -> dict:
     """Create and verify the annotated PDF and contradiction log.
 
@@ -56,6 +126,7 @@ def review_pdf(
     :param output: path to a new run directory.
     :param semantic: optional semantic checker connection and comparison budget.
     :param templates: confirmed, prioritized model conditions for historical review.
+    :param checkpoint: completed model batches for this original PDF.
     :returns: run status, artifact paths, structured findings and coverage warnings.
     :raises ValueError: if the input is not a readable, unencrypted PDF.
     :raises FileExistsError: if the output directory already exists.
@@ -72,18 +143,12 @@ def review_pdf(
         pages, skipped = extract(document)
         findings = find_contradictions(pages)
         warnings = [f"PDF-Seite {page}: kein extrahierbarer Text (keine OCR)." for page in skipped]
-        coverage = "nicht ausgeführt (kein Modell konfiguriert)"
-        historical, model_history, used = review_model_patterns(pages, semantic, templates or [])
-        pending = list(historical)
-        if semantic is not None and used < semantic.max_requests:
-            remaining = replace(semantic, max_requests=semantic.max_requests - used)
-            candidates, semantic_warnings, coverage = semantic_review(pages, remaining)
-            warnings.extend(semantic_warnings)
-            pending.extend(("", candidate) for candidate in candidates)
-        elif semantic is not None:
-            coverage = "allgemeine Prüfung zurückgestellt"
-        if used:
-            coverage += f"; {used} historische Vergleiche versucht"
+        pending, state = _model_batch(pages, semantic, templates or [], checkpoint)
+        model_history = state["outcomes"]
+        warnings.extend(state["warnings"])
+        coverage = state["coverage"]
+        if state["attempts"]:
+            coverage += f"; {state['attempts']} historische Vergleiche versucht"
         if any(status in ("inconclusive", "deferred") for status, _ in model_history.values()):
             warnings.append("Historische Modellprüfung teilweise offen; siehe Regelstatus.")
         origins: dict[int, list[str]] = {}
@@ -237,6 +302,7 @@ def review_pdf(
         "rule_scope": rule_scope(pages),
         "findings": records,
         "model_history": model_history,
+        **({"checkpoint": state} if templates else {}),
         "semantic_coverage": coverage,
         "warnings": warnings,
     }

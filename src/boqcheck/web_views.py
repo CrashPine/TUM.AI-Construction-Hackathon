@@ -302,6 +302,13 @@ def review_view(
             content.append("<ul>" + "".join(entries) + "</ul>")
         else:
             content.append("<p>Keine historischen Regeln gespeichert.</p>")
+        if result.get("can_resume") and not report:
+            content.append(
+                f'<form method="post" action="{base}/resume">'
+                "<p>Änderungen zuerst speichern. Diese Prüfung kann nach einem Neustart über "
+                "dieselbe Adresse fortgesetzt werden.</p>"
+                "<button>Historische Prüfung fortsetzen</button></form>"
+            )
     if not findings:
         content.append("<p>Keine aktiven Befunde.</p>")
     if findings and not report:

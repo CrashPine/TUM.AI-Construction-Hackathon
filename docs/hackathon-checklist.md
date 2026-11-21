@@ -40,7 +40,8 @@ verification.
   terms. Replay applicable templates using grounded evidence in the new PDF and show when the
   model is unavailable or the comparison budget is exhausted. Verified through two independent
   synthetic uploads with a simulated model response.
-- [ ] Persist and resume deferred historical batches for long documents.
+- [x] Persist completed historical batches and resume deferred templates on the same PDF without
+  redoing finished model calls. Verify recovery after restart and preservation of review edits.
 - [ ] Detect ambiguous or potentially unpriced scope with evidence and a German Bieterfrage.
 - [ ] Check German spelling with a dictionary and trade lexicon.
 - [ ] Evaluate model-proposed formulas through typed expressions and Decimal.

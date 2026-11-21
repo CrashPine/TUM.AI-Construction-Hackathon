@@ -1,5 +1,6 @@
 """Verify PDF and GAEB uploads through the local web workflow without a model."""
 
+import json
 from collections.abc import Callable
 from contextlib import closing
 from io import BytesIO
@@ -347,3 +348,35 @@ def test_model_pattern_is_promoted_and_grounded_in_a_new_pdf(
     assert "Valve A" not in report
     with pymupdf.open(stream=_request(restarted, result + "/pdf")[2]) as output:
         assert [page.first_annot.type[1] for page in output] == ["Highlight", "Highlight"]
+
+    edited = urlencode(
+        {"status-BG-001": "confirmed", "question-BG-001": "Welcher Zustand gilt für Ventil B?"}
+    ).encode()
+    assert _request(restarted, result, edited, "application/x-www-form-urlencoded")[0].startswith(
+        "303"
+    )
+    assert "Historische Prüfung fortsetzen" in _request(restarted, result)[2].decode()
+
+    original_pdf = _request(restarted, result + "/pdf")[2]
+    with closing(connect(db_path)) as database:
+        paths = database.execute("SELECT result FROM review_jobs").fetchone()[0]
+    temporary_result = json.loads(paths)
+    Path(temporary_result["annotated_pdf"]).unlink()
+    Path(temporary_result["findings_log"]).unlink()
+
+    recovered = make_app(tmp_path / "after-restart", history_db=db_path, semantic=config)
+    assert _request(recovered, result + "/pdf")[2] == original_pdf
+    assert (
+        "Welcher Zustand gilt für Ventil B?" in _request(recovered, result + "/report")[2].decode()
+    )
+    assert len(prompts) == 2
+    assert _request(recovered, result + "/resume", b"")[0].startswith("303")
+    assert len(prompts) == 3
+    assert prompts[-1][0] == "The valve inspection requirements specify opposite states."
+    page = _request(recovered, result)[2].decode()
+    assert "Zurückgestellt (Vergleichsbudget ausgeschöpft)" not in page
+    assert "Historische Prüfung fortsetzen" not in page
+    assert page.count('<article id="BG-') == 1
+    assert "Bestätigt" in page and "Welcher Zustand gilt für Ventil B?" in page
+    assert _request(recovered, result + "/resume", b"")[0].startswith("400")
+    assert len(prompts) == 3

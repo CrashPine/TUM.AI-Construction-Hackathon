@@ -159,19 +159,26 @@ def _context(pages: list[list[Line]], terms: list[str]) -> tuple[list[list[Line]
 
 
 def review_model_patterns(
-    pages: list[list[Line]], config: SemanticConfig | None, patterns: list[dict]
+    pages: list[list[Line]],
+    config: SemanticConfig | None,
+    patterns: list[dict],
+    *,
+    resuming: bool = False,
 ) -> tuple[list[tuple[str, Finding]], dict[str, tuple[str, str]], int]:
     """Review relevant historical conditions using the current PDF's source IDs.
 
     :param pages: source lines by physical page.
     :param config: optional local model configuration.
     :param patterns: trade-filtered templates in priority order.
+    :param resuming: whether the entire request budget is available to pending patterns.
     :returns: grounded candidates, outcomes by rule, and model calls consumed.
     """
     findings = []
     outcomes = {}
     used = 0
-    limit = (config.max_requests + 1) // 2 if config else 0
+    limit = config.max_requests if config else 0
+    if not resuming:
+        limit = (limit + 1) // 2
     for pattern in patterns:
         rule = pattern["rule"]
         context, truncated = _context(pages, pattern["terms"])
