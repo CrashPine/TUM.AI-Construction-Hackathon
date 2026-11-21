@@ -6,6 +6,9 @@ from decimal import Decimal
 
 from boqcheck.model import BoQ, Item, Section
 
+SHORT_TEXT = "Description/CompleteText/OutlineText/OutlTxt/TextOutlTxt"
+LONG_TEXT = "Description/CompleteText/DetailTxt"
+
 
 def parse_gaeb_xml(data: bytes, source: str) -> BoQ:
     """Parse a GAEB DA XML bill of quantities.
@@ -13,7 +16,8 @@ def parse_gaeb_xml(data: bytes, source: str) -> BoQ:
     :param data: the file content.
     :param source: the file name, for the result and for error messages.
     :returns: the BoQ with its sections and items in document order.
-    :raises ValueError: if the data is not well-formed XML or has no GAEB Award/BoQ element.
+    :raises ValueError: if the data is not well-formed XML or has no GAEB Award/BoQ element, if a
+        BoQBkdn element has no Length, or if no BoQBkdn element has the Type Item.
     """
     try:
         root = ET.fromstring(data)
@@ -25,45 +29,62 @@ def parse_gaeb_xml(data: bytes, source: str) -> BoQ:
     boq = root.find("Award/BoQ")
     if boq is None:
         raise ValueError(f"{source}: not a GAEB DA XML bill of quantities (no Award/BoQ element)")
-    breakdown = boq.findall("BoQInfo/BoQBkdn")
-    level_widths = [
-        int(b.findtext("Length")) for b in breakdown if b.findtext("Type") == "BoQLevel"
+    breakdown = [
+        (b.findtext("Type"), b.findtext("Length")) for b in boq.iterfind("BoQInfo/BoQBkdn")
     ]
-    item_width = next(int(b.findtext("Length")) for b in breakdown if b.findtext("Type") == "Item")
-    entries = list(_entries(boq.find("BoQBody"), (), level_widths, item_width))
+    if "Item" not in dict(breakdown) or not all(length for _, length in breakdown):
+        raise ValueError(f"{source}: invalid BoQBkdn: each needs a Length, one needs the Type Item")
+    # A Lot (Los) is the top section level, above the BoQLevel entries.
+    level_widths = [int(length) for kind, length in breakdown if kind in ("Lot", "BoQLevel")]
+    entries = list(_entries(boq, (), level_widths, int(dict(breakdown)["Item"])))
     return BoQ(
         source=source,
-        phase=root.findtext("Award/DP"),
+        phase=root.findtext("Award/DP", "").strip() or None,
         sections=tuple(entry for entry in entries if isinstance(entry, Section)),
         items=tuple(entry for entry in entries if isinstance(entry, Item)),
     )
 
 
 def _entries(
-    body: ET.Element, prefix: tuple[str, ...], level_widths: list[int], item_width: int
+    parent: ET.Element, prefix: tuple[str, ...], level_widths: list[int], item_width: int
 ) -> Iterator[Section | Item]:
-    """Yield the sections and items below a BoQBody in document order.
+    """Yield the sections and items in the BoQBody of a BoQ or BoQCtgy, in document order.
 
     OZ parts are padded with zeros to the BoQBkdn widths: some files write "1" for "0001".
+    Parts marked as not applicable (Entfällt) are skipped with everything below them.
 
-    :param body: a BoQBody element.
+    :param parent: a BoQ or BoQCtgy element; without a BoQBody it has no entries.
     :param prefix: the padded OZ parts of the enclosing sections.
-    :param level_widths: the OZ widths of the section levels.
+    :param level_widths: the OZ widths of the section levels, Lot first.
     :param item_width: the OZ width of the item level.
     :yields: each section before its contents, and each item.
     """
-    for ctgy in body.iterfind("BoQCtgy"):
+    for ctgy in parent.iterfind("BoQBody/BoQCtgy"):
+        if ctgy.findtext("NotApplBoQ") == "Yes":
+            continue
         oz = (*prefix, ctgy.get("RNoPart").zfill(level_widths[len(prefix)]))
         yield Section(oz=".".join(oz), title=_text(ctgy.find("LblTx")))
-        yield from _entries(ctgy.find("BoQBody"), oz, level_widths, item_width)
-    for item in body.iterfind("Itemlist/Item"):
-        quantity = item.findtext("Qty")
+        yield from _entries(ctgy, oz, level_widths, item_width)
+    for item in parent.iterfind("BoQBody/Itemlist/Item"):
+        if item.findtext("NotAppl") == "Yes":
+            continue
+        quantity = item.findtext("Qty", "").strip()
+        number = item.get("RNoPart").zfill(item_width) + item.get("RNoIndex", "")
         yield Item(
-            oz=".".join((*prefix, item.get("RNoPart").zfill(item_width))),
-            short_text=_text(item.find("Description/CompleteText/OutlineText/OutlTxt/TextOutlTxt")),
+            oz=".".join((*prefix, number)),
+            short_text=_text(item.find(SHORT_TEXT)),
             # DetailTxt interleaves Text with TextComplement (owner text, bidder blanks).
-            long_text=_text(item.find("Description/CompleteText/DetailTxt")),
-            quantity=None if quantity is None else Decimal(quantity),
+            # Sub-descriptions (Unterbeschreibungen) are part of the scope; the label line
+            # follows the printed LV of the same BoQ.
+            long_text="\n".join(
+                [_text(item.find(LONG_TEXT))]
+                + [
+                    f"Unterbeschreibung {sub.findtext('SubDNo')}:\n"
+                    f"{_text(sub.find(SHORT_TEXT))}\n{_text(sub.find(LONG_TEXT))}"
+                    for sub in item.iterfind("SubDescr")
+                ]
+            ),
+            quantity=Decimal(quantity) if quantity else None,
             unit=item.findtext("QU", ""),
             provisional=item.find("Provis") is not None,
             lump_sum=item.findtext("LumpSumItem") == "Yes",

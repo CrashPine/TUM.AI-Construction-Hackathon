@@ -20,9 +20,11 @@ class Section:
 class Item:
     """A line item (Position).
 
-    :ivar oz: the full Ordnungszahl, levels joined by ".", for example "01.02.0030".
+    :ivar oz: the full Ordnungszahl, levels joined by ".", for example "01.02.0030"; an index
+        letter follows without a separator, for example "01.02.0030A".
     :ivar short_text: the Kurztext; line breaks are newlines.
-    :ivar long_text: the Langtext; line breaks are newlines.
+    :ivar long_text: the Langtext; line breaks are newlines. Each sub-description follows with the
+        line "Unterbeschreibung <n>:", its Kurztext and its Langtext.
     :ivar quantity: the quantity (Menge), or None if the file gives none.
     :ivar unit: the unit (ME) as the file writes it, for example "m3", "m³" or "Stk.".
     :ivar provisional: True for a Bedarfsposition (provisional item).

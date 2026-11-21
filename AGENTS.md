@@ -46,10 +46,18 @@ boq = parse(path.name, path.read_bytes())  # sections and items in document orde
 
 `parse()` selects the parser by the file suffix, in any letter case. It reads `.x83` (GAEB DA XML).
 It raises `ValueError` for other suffixes, for data that is not well-formed XML and for XML without
-a GAEB `Award/BoQ` element. Other faults can raise other exceptions, for example a `Qty` that is
-not a number. All parsers return the model in `src/boqcheck/model.py` (`BoQ`, `Section`, `Item`).
-An OZ joins its levels with `.` and pads them with zeros to the widths of the BoQ breakdown, for
-example `01.02.0030`. Units stay as the file writes them (`m3`, `m³`, `Stk.`).
+a GAEB `Award/BoQ` element. It also raises `ValueError` if a `BoQBkdn` element has no `Length`,
+or if no `BoQBkdn` element has the type `Item`. Other faults can raise other exceptions, for
+example a `Qty` that is not a number. All parsers return the model in `src/boqcheck/model.py`
+(`BoQ`, `Section`, `Item`) with these rules:
+
+- An OZ joins its levels with `.` and pads them with zeros to the widths of the BoQ breakdown, for
+  example `01.02.0030`. A lot (Los, `Lot` in the breakdown) is the top level. An index letter
+  follows the item number without a separator, for example `01.02.0030A`.
+- Parts marked as not applicable (Entfällt) are left out, with everything below them.
+- The long text of an item ends with its sub-descriptions (Unterbeschreibungen). Each one starts
+  with the line `Unterbeschreibung <n>:`, followed by its short text and its long text.
+- Units stay as the file writes them (`m3`, `m³`, `Stk.`).
 
 ## Repository map
 
@@ -96,8 +104,18 @@ the GAEB specification. All texts are German; PDFs use a decimal comma (`1.234,5
 - `RNoPart` values are not always padded: `8209.003_Leistungsverzeichnis_leer.X83` and
   `[NUMMER_001]_leer.X83` write `1` where `BoQBkdn` gives 2 or 4 digits. `StBALV23040.D86` writes
   the OZs of the same BoQ with zeros (`01.01.0001`).
-- The parser skips `Remark` (notes) and `PerfDescr` elements, and item children such as `SubDescr`
-  (sub-descriptions), `RefDescr` and `RefRNo` in `[NUMMER_001]_leer.X83`.
+- The parser skips `Remark` (notes) and `PerfDescr` elements, and item children such as
+  `RefDescr` and `RefRNo` in `[NUMMER_001]_leer.X83`.
+- `[NUMMER_001]_leer.X83` has 16 `SubDescr` elements (sub-descriptions) in 13 items, numbered by
+  `SubDNo` from 1 in each item. Each has a short and a long text. `Leistungsverzeichnis_leer.pdf`
+  prints each one as `Unterbeschreibung <n>:`, then its short text and its long text. The parser
+  writes them the same way.
+- Item texts have lists (`ul`/`li`) only in `8209.003_Leistungsverzeichnis_leer.X83`. Each `li`
+  holds a `p`, so each list item gets its own line. Tables (`table`/`tr`/`td`) occur only in
+  `Award/AddText` of `501-24-01_GAEB-XML_sas.x83`, and the parser does not read `AddText`.
+- No file has a `Lot` breakdown entry, an `RNoIndex` attribute, `NotAppl`, or `NotApplBoQ` `Yes`
+  (`501-24-01_GAEB-XML_sas.x83` has `NotApplBoQ` `No` in all 25 sections). Tests cover them
+  with synthetic XML.
 - Some items have `Provis` or `LumpSumItem` children. `501-24-01_GAEB-XML_sas.x83` also has STLB-Bau
   references (`STLBBauID`).
 - No file has `UP` or `IT` (unit price, total) elements: all four are unpriced.
