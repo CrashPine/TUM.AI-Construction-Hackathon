@@ -27,10 +27,14 @@ def load_lexicon(path: Path) -> frozenset[str]:
     )
 
 
-def spelling_validator(lexicon: frozenset[str]) -> Callable[[dict, Line], Finding | None]:
+def spelling_validator(
+    lexicon: frozenset[str], attest: Callable[[str], bool | None] | None = None
+) -> Callable[[dict, Line], Finding | None]:
     """Validate exact tokens and cache local lookups for one analysis.
 
     :param lexicon: lowercased project or trade vocabulary.
+    :param attest: optional opt-in word attestation, asked only where the local lists decide
+        nothing: a locally unknown correction, and an original that would become a finding.
     :returns: validator that reuses dictionary lookups for the current analysis.
     """
     dictionary = SpellChecker(language="de", distance=1)
@@ -46,14 +50,14 @@ def spelling_validator(lexicon: frozenset[str]) -> Callable[[dict, Line], Findin
         return word in trade_terms or word in dictionary
 
     @cache
-    def supported(original: str, correction: str) -> bool:
-        """Accept an attested one-edit replacement of an unrecognized token.
+    def plausible(original: str, correction: str) -> bool:
+        """Accept a one-edit replacement of an unrecognized, non-compound token.
 
         :param original: lowercased source token.
         :param correction: lowercased proposed replacement.
-        :returns: whether the replacement has enough local support.
+        :returns: whether the replacement is a plausible fix.
         """
-        if known(original) or not known(correction):
+        if known(original):
             return False
         for index in range(4, len(original) - 3):
             prefix, suffix = original[:index], original[index:]
@@ -84,7 +88,11 @@ def spelling_validator(lexicon: frozenset[str]) -> Callable[[dict, Line], Findin
         # Embedded model numbers, bracketed placeholders and dashed compounds are ambiguous.
         pattern = rf"(?<![\w\[/-]){re.escape(token)}(?![\w\]/-])"
         spots = list(re.finditer(pattern, line.text))
-        if len(spots) != 1 or not supported(token.lower(), correction.lower()):
+        if len(spots) != 1 or not plausible(token.lower(), correction.lower()):
+            return None
+        if not (known(correction.lower()) or attest is not None and attest(correction) is True):
+            return None
+        if attest is not None and attest(token) is True:
             return None
         start, end = spots[0].span()
         return Finding(

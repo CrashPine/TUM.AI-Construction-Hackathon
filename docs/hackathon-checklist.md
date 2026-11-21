@@ -49,7 +49,10 @@ verification.
 - [ ] Extend attachment analysis to ambiguous free text, additional layouts and GAEB source positions.
 - [x] Check proposed German PDF typos against the local dictionary and project lexicon.
   Validate the exact source token, retain the original, and export reviewer edits in the report.
-- [ ] Add optional token-only online attestation and provenance caching for unresolved words.
+- [x] Add optional token-only online attestation and provenance caching for unresolved words.
+  Off by default. Only approved single words are sent, after unanimous answers from all
+  services, and warnings report counts only. The letters-only filter does not guarantee
+  confidentiality: the approved word list is the control.
 - [x] Evaluate model-proposed PDF line-price formulas for adjacent labelled quantity, explicit
   unit-price basis and stated total in one OZ. Ground operands in source lines, round to cents
   and report checked versus unresolved labelled totals.
