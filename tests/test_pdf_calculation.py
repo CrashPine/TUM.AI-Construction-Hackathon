@@ -1,13 +1,16 @@
 """Check a typed model proposal through PDF extraction, validation and export."""
 
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 
 import pymupdf
 import pytest
 
 from boqcheck import semantic
-from boqcheck.pdf_extract import extract
+from boqcheck.numeric_roles import number_roles
+from boqcheck.pdf_calculation import evaluate_price, price_groups
+from boqcheck.pdf_extract import Line, extract
 from boqcheck.price_table import table_prices
 from boqcheck.review_pdf import review_pdf
 from boqcheck.semantic import SemanticConfig
@@ -77,6 +80,10 @@ def test_price_review(
     monkeypatch.setattr(semantic, "_request", propose)
     result = review_pdf("price.pdf", data, tmp_path / "out", semantic=SemanticConfig("", "test"))
     assert f"{checked}/1 beschriftete" in result["semantic_coverage"]
+    assert (
+        "Zahlenrollen: 3 Eingabe, 1 abgeleitet, 1 Kennung, 0 Spezifikation, 0 unklar; "
+        f"{4 - 4 * checked} Werte ungeprüft"
+    ) in result["semantic_coverage"]
     assert bool(result["findings"]) == mismatch
     if mismatch:
         (finding,) = result["findings"]
@@ -125,3 +132,79 @@ def test_split_price_rows_across_pages() -> None:
     assert all(line.page == 30 and line.oz == "3.1.3" for line in finding.passages[0])
     page[:] = [replace(line, text="USD") if line.text == "EUR" else line for line in page]
     assert not table_prices(pages[29:31])[0]
+
+
+def _lines(*texts: str) -> dict[str, Line]:
+    r"""Build source lines of one item on one page.
+
+    :param \*texts: line texts in reading order.
+    :returns: lines keyed like the semantic reviewer.
+    """
+    quad = pymupdf.Rect(0, 0, 1, 1).quad
+    return {f"L{i}": Line(0, None, "01.01.0010", t, quad) for i, t in enumerate(texts, 1)}
+
+
+def test_number_roles() -> None:
+    """Give every standalone number one role, exact span and value only when unambiguous."""
+    sources = _lines(
+        "01.01.0010. Rohr DN100 nach DIN EN 1992-1-1, Länge 6 m2, [NUMMER_001] -5 Stück 7",
+        "Menge: 1.000,0 m",
+        "EP: 1,2345 EUR / 100 cm",
+        "Gesamtbetrag: 12,34 EUR",
+    )
+    tokens = number_roles(sources)
+    assert [(t.id, t.role, t.raw, t.value) for t in tokens] == [
+        ("L1.c0", "identifier", "01.01.0010", None),
+        ("L1.c19", "specification", "100", Decimal(100)),
+        ("L1.c35", "identifier", "1992-1-1", None),
+        ("L1.c51", "specification", "6", Decimal(6)),
+        ("L1.c70", "unknown", "-5", None),
+        ("L1.c79", "unknown", "7", Decimal(7)),
+        ("L2.qty", "input", "1.000,0", Decimal("1000.0")),
+        ("L3.price", "input", "1,2345", Decimal("1.2345")),
+        ("L3.basis", "input", "100", Decimal(100)),
+        ("L4.total", "derived", "12,34", Decimal("12.34")),
+    ]
+    assert all(sources[t.source].text[t.start : t.end] == t.raw for t in tokens)
+
+
+def test_price_expressions() -> None:
+    """Accept only allowlisted trees equal to quantity times price per basis."""
+    sources = _lines("01.01.0010. Rohr", "Menge: 10 m", "EP: 2 EUR / 100 cm", "GB: 20,00 EUR")
+    (group,) = price_groups(sources).values()
+    q, p, b, t = (group[0][k] for k in ("qty", "price", "basis", "total"))
+
+    def tree(op: str, *args: object) -> dict:
+        r"""Build one expression node.
+
+        :param op: operator name.
+        :param \*args: operand trees or token IDs.
+        :returns: expression node.
+        """
+        return {"op": op, "args": list(args)}
+
+    accepted = [
+        tree("div", tree("mul", q, p), b),
+        tree("div", tree("mul", p, q), b),
+        tree("mul", q, tree("div", p, b)),
+    ]
+    rejected = [
+        tree("div", tree("mul", p, b), q),
+        tree("mul", tree("mul", q, p), b),
+        tree("div", tree("mul", q, q), b),
+        tree("div", tree("mul", q, p), "L9.basis"),
+        tree("div", tree("mul", q, p), t),
+        tree("div", tree("mul", q, p), "100"),
+        tree("div", tree("mul", q, p), 100),
+        tree("div", tree("add", q, p), b),
+        tree("sub", tree("add", tree("div", tree("mul", q, p), b), q), q),
+        {"op": "div", "args": [tree("mul", q, p), b], "eval": "1"},
+        tree("div", tree("mul", q, p, p), b),
+        "__import__('os')",
+    ]
+    deep: object = q
+    for _ in range(50):
+        deep = tree("mul", deep, b)
+    rejected.append(deep)
+    assert all(evaluate_price(group, e) == (True, None) for e in accepted)
+    assert not any(evaluate_price(group, e)[0] for e in rejected)

@@ -57,8 +57,10 @@ verification.
 - [x] Recalculate the second priced PDF layout with a separate unit column and carry-over positions. Verified all 248 recognised items in Abgabe LV.pdf and a one-cent change across a page break.
 - [x] Reconcile source-backed section subtotals in both priced PDFs (14 explicit section totals and 23 keyed summary rows). Count unresolved optional membership as unchecked. Test explicit inclusion, exclusion and a one-cent error.
 - [x] Convert compatible units in labelled PDF price formulas. Verify metres against a price per 100 centimetres and reject incompatible dimensions.
-- [ ] Extend PDF arithmetic to other table layouts, numerical token roles beyond labelled price fields,
-  and other subtotal layouts.
+- [x] Give every PDF number a role (input, derived, identifier, specification, unknown) with an exact
+  source ID, and accept model price formulas only as allowlisted add/sub/mul/div trees over the group's
+  token IDs that are dimensionally consistent and equal quantity × price / basis. Report unchecked values.
+- [ ] Extend PDF arithmetic to other table layouts and other subtotal layouts.
 - [x] Import GAEB 90 D84, D83 and D86 through the parser. Fixture tests cover counts, prices and OZs.
 - [x] Connect D83, D84 and D86 to the web review and HTML export. Verify all five uploads,
   missing quantities in the price-only D84 and a changed price with original record evidence.

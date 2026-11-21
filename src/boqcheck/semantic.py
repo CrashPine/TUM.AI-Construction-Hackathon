@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from .contradictions import Finding
+from .numeric_roles import number_roles
 from .pdf_calculation import evaluate_price, price_groups
 from .pdf_extract import Line
 from .spelling import spelling_validator
@@ -44,7 +45,8 @@ hyphenated word breaks and obvious extraction artifacts. Do not suggest style ch
 For each entry in price_fields, propose the line-price expression even if it looks correct.
 Return kind="calculation", target=<total token ID>, expr={"op":"div","args":[
 {"op":"mul","args":[<qty token ID>,<price token ID>]},<basis token ID>]}.
-Use the exact token IDs from that entry. Omit ambiguous relationships."""
+Use the exact token IDs from that entry as the only leaves; nodes allow only add, sub, mul and div
+with two args. Omit ambiguous relationships."""
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -399,6 +401,17 @@ def semantic_review(
         coverage += (
             f". PDF-Positionsrechnung: {len(verified_prices)}/{stated} beschriftete "
             f"Gesamtbeträge geprüft, {stated - len(verified_prices)} offen"
+        )
+        numbers = number_roles(sources)
+        roles = Counter(token.role for token in numbers)
+        checked_ids = {i for target in verified_prices for i in prices[target][0].values()}
+        unchecked = sum(
+            token.role in ("input", "derived") and token.id not in checked_ids for token in numbers
+        )
+        coverage += (
+            f". Zahlenrollen: {roles['input']} Eingabe, {roles['derived']} abgeleitet, "
+            f"{roles['identifier']} Kennung, {roles['specification']} Spezifikation, "
+            f"{roles['unknown']} unklar; {unchecked} Werte ungeprüft"
         )
     findings.extend(finding for finding in spelling.values() if finding is not None)
     if spell is not None:
