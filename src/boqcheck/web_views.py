@@ -10,6 +10,7 @@ _HISTORY_STATUS = {
     "checked": "Geprüft",
     "inapplicable": "Nicht anwendbar",
     "inconclusive": "Offen",
+    "deferred": "Zurückgestellt",
 }
 _RULE_NAMES = {
     "scope_reference": "Zeichnungsumfang",
@@ -21,6 +22,9 @@ _HISTORY_REASONS = {
     "partial_text": "PDF-Text nur teilweise verfügbar",
     "scope": "keine passenden Positionsmerkmale",
     "unsupported_rule": "Regel nicht verfügbar",
+    "model_disabled": "Modell für diesen Lauf nicht aktiviert",
+    "model_incomplete": "Modell nicht verfügbar oder Quellenauswahl unvollständig",
+    "budget": "Vergleichsbudget ausgeschöpft",
 }
 _HISTORY_FIELDS = """
 <fieldset><legend>Für das Speichern in der Historie</legend>
@@ -181,11 +185,19 @@ def _finding(base: str, finding: dict, report: bool, history: bool) -> str:
                 f'maxlength="2000">{escape(finding["question"])}</textarea>',
             ]
         )
-        if history and finding.get("rule") in RULES:
+        if history and finding.get("rule") in RULES | {"semantic"}:
             pieces.append(
                 f'<label><input type="checkbox" name="promote-{identifier}"> '
                 "Bestätigten Befund in die Historie aufnehmen</label>"
             )
+            if finding["rule"] == "semantic":
+                pieces.append(
+                    f'<label for="condition-{identifier}">Konfliktbedingung</label>'
+                    f'<textarea id="condition-{identifier}" name="condition-{identifier}" '
+                    'rows="2" maxlength="500"></textarea>'
+                    f'<label for="terms-{identifier}">Suchbegriffe, durch Kommas getrennt</label>'
+                    f'<input id="terms-{identifier}" name="terms-{identifier}" maxlength="500">'
+                )
     pieces.append("</article>")
     return "".join(pieces)
 
@@ -278,7 +290,9 @@ def review_view(
         if result["history"]:
             entries = []
             for pattern in result["history"]:
-                label = escape(_RULE_NAMES.get(pattern["rule"], pattern["rule"]))
+                label = escape(
+                    pattern["condition"] or _RULE_NAMES.get(pattern["rule"], pattern["rule"])
+                )
                 status = _HISTORY_STATUS[pattern["status"]]
                 reason = _HISTORY_REASONS.get(pattern["reason"])
                 detail = f" ({reason})" if reason else ""
@@ -294,7 +308,7 @@ def review_view(
         content.append(f'<form method="post" action="{base}">')
     content.extend(_finding(base, finding, report, history) for finding in findings)
     if findings and not report:
-        if history and any(f.get("rule") in RULES for f in findings):
+        if history and any(f.get("rule") in RULES | {"semantic"} for f in findings):
             content.append(
                 _HISTORY_FIELDS.replace("<!--current-trade-->", escape(result["history_trade"]))
             )

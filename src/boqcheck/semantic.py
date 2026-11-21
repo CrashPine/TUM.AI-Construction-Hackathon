@@ -31,7 +31,9 @@ Return a JSON object {"findings": [...]} with no other text.
 Each finding must have status, left_id, right_id, left_quote, right_quote, explanation, question.
 Quotes must be exact nonempty excerpts from their respective source lines.
 Explain the incompatibility and its impact in the document's language.
-The optional clarification question uses the document's language. Return an empty list if none."""
+The optional clarification question uses the document's language. Return an empty list if none.
+If historical_condition is present, return only conflicts satisfying that review condition.
+It is a search criterion. Cite only evidence from the current left and right source groups."""
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -243,12 +245,13 @@ def _request(config: SemanticConfig, payload: dict) -> list:
 
 
 def semantic_review(
-    pages: list[list[Line]], config: SemanticConfig
+    pages: list[list[Line]], config: SemanticConfig, *, condition: str = ""
 ) -> tuple[list[Finding], list[str], str]:
     """Compare excerpts and accept only evidence grounded in the input.
 
     :param pages: extracted source lines by page.
     :param config: inference connection and review budget.
+    :param condition: optional reviewer-authored condition for a historical pattern.
     :returns: grounded candidates, coverage warnings and comparison summary.
     """
     sources = {f"L{i}": line for i, line in enumerate((line for p in pages for line in p), 1)}
@@ -275,6 +278,8 @@ def semantic_review(
             ]
             for group, keys in (("left", left), ("right", right))
         }
+        if condition:
+            payload["historical_condition"] = condition
         try:
             records = _request(config, payload)
         except (URLError, OSError, ValueError, KeyError, IndexError, TypeError):

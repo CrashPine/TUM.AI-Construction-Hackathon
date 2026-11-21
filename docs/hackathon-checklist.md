@@ -36,8 +36,11 @@ verification.
   and match saved PDF rules against new uploads in stable priority order.
 - [x] Filter existing historical PDF rules by an optional trade and by the position and component
   cues used by each rule. Show why a rule is inapplicable or inconclusive.
-- [ ] Complete historical replay with reusable patterns for model findings and resumable batches
-  with deferred coverage.
+- [x] Promote confirmed model findings to reusable conditions with reviewer-supplied search
+  terms. Replay applicable templates using grounded evidence in the new PDF and show when the
+  model is unavailable or the comparison budget is exhausted. Verified through two independent
+  synthetic uploads with a simulated model response.
+- [ ] Persist and resume deferred historical batches for long documents.
 - [ ] Detect ambiguous or potentially unpriced scope with evidence and a German Bieterfrage.
 - [ ] Check German spelling with a dictionary and trade lexicon.
 - [ ] Evaluate model-proposed formulas through typed expressions and Decimal.

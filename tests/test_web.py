@@ -261,3 +261,89 @@ def test_optional_web_model_keeps_roof_rule_on_failure(
         assert "Lokales Modell: bonsai-2:27b" in page and "nicht verfügbar" in page
         assert "OZ 9.2.3" in page and "OZ 9.2.4" in page
     assert _request(app, run + "/pdf")[2].startswith(b"%PDF")
+
+
+def test_model_pattern_is_promoted_and_grounded_in_a_new_pdf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replay a confirmed model pattern on independent source pages.
+
+    :param tmp_path: isolated database and PDF artifacts directory.
+    :param monkeypatch: fixture for replacing model inference.
+    """
+    db_path = tmp_path / "history.sqlite3"
+    config = semantic.SemanticConfig("http://127.0.0.1:44445/api/chat", "test", max_requests=1)
+    condition = "During inspection the same valve cannot be both open and closed."
+    prompts = []
+
+    def infer(selected: semantic.SemanticConfig, payload: dict) -> list[dict]:
+        """Simulate source-backed inference and record only the current clauses.
+
+        :param selected: configured test model.
+        :param payload: selected current-document excerpts and optional condition.
+        :returns: one validated-shape model proposal.
+        """
+        assert selected.model == "test"
+        clauses = [line["text"] for line in payload["left"]]
+        prompts.append((payload.get("historical_condition"), clauses))
+        left, right = payload["left"]
+        return [
+            {
+                "left_id": left["id"],
+                "right_id": right["id"],
+                "left_quote": "remain open",
+                "right_quote": "remain closed",
+                "status": "conflict",
+                "explanation": "The same valve has incompatible inspection requirements.",
+            }
+        ]
+
+    monkeypatch.setattr(semantic, "_request", infer)
+    app = make_app(tmp_path, history_db=db_path, semantic=config)
+    documents = []
+    for valve in ("Valve A", "Valve B"):
+        with pymupdf.open() as source:
+            for state in ("open", "closed"):
+                source.new_page().insert_text(
+                    (72, 72), f"{valve} must remain {state} during inspection."
+                )
+            documents.append(source.tobytes())
+    first, second = documents
+    initial = _request(app, "/upload?name=first.pdf&semantic=1", first, "application/pdf")
+    run = initial[1]["Location"]
+    form = {
+        "status-BG-001": "confirmed",
+        "promote-BG-001": "on",
+        "condition-BG-001": condition,
+        "terms-BG-001": "Inspection, Valve",
+        "reviewer": "QA",
+    }
+    for terms in ("Inspection, Valve", "valve, inspection, valve"):
+        form["terms-BG-001"] = terms
+        response = _request(app, run, urlencode(form).encode(), "application/x-www-form-urlencoded")
+        assert response[0].startswith("303")
+    with closing(connect(db_path)) as database:
+        assert database.execute("SELECT COUNT(*) FROM semantic_patterns").fetchone() == (1,)
+        assert database.execute("SELECT COUNT(*) FROM confirmed_cases").fetchone() == (1,)
+    form["condition-BG-001"] = "The valve inspection requirements specify opposite states."
+    form["severity"] = "low"
+    response = _request(app, run, urlencode(form).encode(), "application/x-www-form-urlencoded")
+    assert response[0].startswith("303")
+
+    restarted = make_app(tmp_path, history_db=db_path, semantic=config)
+    offline = _request(restarted, "/upload?name=second.pdf", second, "application/pdf")
+    assert (
+        "Modell für diesen Lauf nicht aktiviert"
+        in _request(restarted, offline[1]["Location"])[2].decode()
+    )
+    assert len(prompts) == 1
+    reviewed = _request(restarted, "/upload?name=second.pdf&semantic=1", second, "application/pdf")
+    result = reviewed[1]["Location"]
+    assert prompts[-1][0] == condition and len(prompts) == 2
+    assert all("Valve B" in clause for clause in prompts[-1][1])
+    report = _request(restarted, result + "/report")[2].decode()
+    assert "Historischer Modell-Treffer" in report and "Valve B" in report
+    assert "Zurückgestellt (Vergleichsbudget ausgeschöpft)" in report
+    assert "Valve A" not in report
+    with pymupdf.open(stream=_request(restarted, result + "/pdf")[2]) as output:
+        assert [page.first_annot.type[1] for page in output] == ["Highlight", "Highlight"]

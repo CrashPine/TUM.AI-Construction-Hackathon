@@ -11,7 +11,7 @@ from urllib.parse import parse_qs
 from uuid import uuid4
 from wsgiref.simple_server import make_server
 
-from .history import RULES, SEVERITIES, initialize, promote, replay
+from .history import RULES, SEVERITIES, initialize, model_patterns, promote, replay
 from .review_pdf import review_pdf
 from .semantic import SemanticConfig
 from .web_gaeb import review_x83
@@ -59,8 +59,24 @@ def _update(
             raise ValueError("Ungültige Prüfdaten.")
         changes.append((finding, status, question))
         if f"promote-{identifier}" in fields:
-            if history_db is None or status != "confirmed" or finding.get("rule") not in RULES:
+            rule = finding.get("rule")
+            if history_db is None or status != "confirmed" or rule not in RULES | {"semantic"}:
                 raise ValueError("Nur bestätigte Befunde mit wiederverwendbarer Regel speichern.")
+            if rule == "semantic":
+                condition = " ".join(fields.get(f"condition-{identifier}", [""])[0].split())
+                raw = fields.get(f"terms-{identifier}", [""])[0]
+                terms = sorted(
+                    {" ".join(term.casefold().split()) for term in raw.split(",")} - {""}
+                )
+                if (
+                    not 1 <= len(condition) <= 500
+                    or not 1 <= len(terms) <= 6
+                    or any(not 2 <= len(term) <= 80 for term in terms)
+                ):
+                    raise ValueError(
+                        "Für ein Modellmuster sind Regelbedingung und Suchbegriffe nötig."
+                    )
+                finding = {**finding, "template": (condition, terms)}
             cases.append((finding, question))
     if cases:
         reviewer = fields.get("reviewer", [""])[0].strip()
@@ -73,20 +89,23 @@ def _update(
         finding.update(review_status=status, question=question)
 
 
-def _analyse(env: dict, name: str, output: Path, semantic: SemanticConfig | None) -> dict:
+def _analyse(
+    env: dict, name: str, output: Path, semantic: SemanticConfig | None, templates: list[dict]
+) -> dict:
     """Dispatch the upload to its analyzer using the original filename.
 
     :param env: WSGI request environment.
     :param name: uploaded filename.
     :param output: path for PDF output files.
     :param semantic: optional model configuration for this upload.
+    :param templates: saved model conditions applicable to the upload trade.
     :returns: structured review result.
     :raises ValueError: if the suffix is unsupported.
     """
     suffix = Path(name).suffix.lower()
     if suffix == ".pdf":
         data = _read_body(env, _MAX_UPLOAD, media_type="application/pdf")
-        result = review_pdf(name, data, output, semantic=semantic)
+        result = review_pdf(name, data, output, semantic=semantic, templates=templates)
         if semantic is not None:
             result["semantic_model"] = semantic.model
         result["document_hash"] = sha256(data).hexdigest()
@@ -134,9 +153,10 @@ def make_app(
                 name = query.get("name", ["upload.pdf"])[0][:200]
                 identifier = uuid4().hex
                 selected = semantic if query.get("semantic") == ["1"] else None
-                result = _analyse(env, name, directory / identifier, selected)
+                trade = query.get("trade", [""])[0].strip()[:120]
+                templates = model_patterns(history_db, trade) if history_db else []
+                result = _analyse(env, name, directory / identifier, selected, templates)
                 if history_db is not None:
-                    trade = query.get("trade", [""])[0].strip()[:120]
                     result["history_trade"] = trade
                     result["history"] = replay(history_db, result, trade=trade)
                     matched = {

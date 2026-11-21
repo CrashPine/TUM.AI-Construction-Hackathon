@@ -46,6 +46,10 @@ The next upload reports coverage for saved drawing-scope and aggregate-limit rul
 Enter the trade on upload to restrict historical matches to cases tagged with that trade and
 untagged cases. With the field blank, all saved rules are considered. Position cues are checked
 against extracted PDF text, and the report explains skipped or inconclusive historical rules.
+To promote a confirmed model finding, also enter a reusable conflict condition and comma-separated
+search phrases. On a new PDF upload with the model enabled, historical conditions use up to half
+the comparison budget (rounded up). A replay finding must cite excerpts from the new PDF.
+The report shows conditions that were deferred when the budget ran out.
 
 ### Command-line review
 

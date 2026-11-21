@@ -4,12 +4,14 @@ import argparse
 import json
 import re
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pymupdf
 
 from .contradictions import find_contradictions, rule_scope
+from .history import review_model_patterns
 from .pdf_annotate import annotate
 from .pdf_extract import Line, extract
 from .semantic import SemanticConfig, semantic_review
@@ -40,7 +42,12 @@ def _excerpt(passage: tuple[Line, ...]) -> str:
 
 
 def review_pdf(
-    filename: str, pdf_bytes: bytes, output: Path, *, semantic: SemanticConfig | None = None
+    filename: str,
+    pdf_bytes: bytes,
+    output: Path,
+    *,
+    semantic: SemanticConfig | None = None,
+    templates: list[dict] | None = None,
 ) -> dict:
     """Create and verify the annotated PDF and contradiction log.
 
@@ -48,6 +55,7 @@ def review_pdf(
     :param pdf_bytes: complete PDF contents.
     :param output: path to a new run directory.
     :param semantic: optional semantic checker connection and comparison budget.
+    :param templates: confirmed, prioritized model conditions for historical review.
     :returns: run status, artifact paths, structured findings and coverage warnings.
     :raises ValueError: if the input is not a readable, unencrypted PDF.
     :raises FileExistsError: if the output directory already exists.
@@ -65,16 +73,36 @@ def review_pdf(
         findings = find_contradictions(pages)
         warnings = [f"PDF-Seite {page}: kein extrahierbarer Text (keine OCR)." for page in skipped]
         coverage = "nicht ausgeführt (kein Modell konfiguriert)"
-        if semantic is not None:
-            candidates, semantic_warnings, coverage = semantic_review(pages, semantic)
+        historical, model_history, used = review_model_patterns(pages, semantic, templates or [])
+        pending = list(historical)
+        if semantic is not None and used < semantic.max_requests:
+            remaining = replace(semantic, max_requests=semantic.max_requests - used)
+            candidates, semantic_warnings, coverage = semantic_review(pages, remaining)
             warnings.extend(semantic_warnings)
-            for candidate in candidates:
-                left, right = candidate.passages
-                if not any(
-                    left[0] in a and right[0] in b or right[0] in a and left[0] in b
-                    for a, b in (finding.passages for finding in findings)
-                ):
-                    findings.append(candidate)
+            pending.extend(("", candidate) for candidate in candidates)
+        elif semantic is not None:
+            coverage = "allgemeine Prüfung zurückgestellt"
+        if used:
+            coverage += f"; {used} historische Vergleiche versucht"
+        if any(status in ("inconclusive", "deferred") for status, _ in model_history.values()):
+            warnings.append("Historische Modellprüfung teilweise offen; siehe Regelstatus.")
+        origins: dict[int, list[str]] = {}
+        for pattern, candidate in pending:
+            left, right = candidate.passages
+            existing = next(
+                (
+                    finding
+                    for finding in findings
+                    if (left[0] in finding.passages[0] and right[0] in finding.passages[1])
+                    or (right[0] in finding.passages[0] and left[0] in finding.passages[1])
+                ),
+                None,
+            )
+            if existing is None:
+                existing = candidate
+                findings.append(candidate)
+            if pattern:
+                origins.setdefault(id(existing), []).append(pattern)
         details = []
         records = []
         expected: Counter[tuple[int, str, str, str]] = Counter()
@@ -84,6 +112,8 @@ def review_pdf(
                 "Widerspruchskandidat" if finding.status == "conflict" else "Klärungsbedarf"
             )
             method = "Semantische Modellprüfung" if finding.kind == "semantic" else "Regelprüfung"
+            if id(finding) in origins:
+                method += " · Historischer Modell-Treffer"
             category, impact = {
                 "scope_reference": (
                     "Leistungsumfang",
@@ -98,6 +128,7 @@ def review_pdf(
                 {
                     "id": identifier,
                     "rule": finding.kind,
+                    "history_rules": origins.get(id(finding), []),
                     "assessment": assessment,
                     "method": method,
                     "category": category,
@@ -205,6 +236,7 @@ def review_pdf(
         "text_pages": len(pages) - len(skipped),
         "rule_scope": rule_scope(pages),
         "findings": records,
+        "model_history": model_history,
         "semantic_coverage": coverage,
         "warnings": warnings,
     }
