@@ -25,7 +25,7 @@ verification.
   deterministic arithmetic on priced positions with a known price basis. Empty X83 prices are normal.
   The four real X83 samples are unpriced. Arithmetic was verified with explicit fields in synthetic
   XML. Priced GAEB phase adapters remain open.
-- [ ] Prepare the 90-second estimator demo after the web flow works.
+- [x] Prepare the [90-second estimator demo](estimator-demo.md) on the real roof LV.
 
 ## Additional analysis and formats
 
@@ -50,7 +50,8 @@ verification.
   Validate the exact source token, retain the original, and export reviewer edits in the report.
 - [ ] Add optional token-only online attestation and provenance caching for unresolved words.
 - [ ] Evaluate model-proposed formulas through typed expressions and Decimal.
-- [ ] Add GAEB 90 D84, D83 and D86, then supporting DOCX and mapped XLSX imports with evidence.
+- [x] Import GAEB 90 D84, D83 and D86 through the parser. Fixture tests cover counts, prices and OZs.
+- [ ] Connect GAEB 90 to the web review and add supporting DOCX and mapped XLSX imports with evidence.
 - [ ] Accept a supporting DOCX in the same LV review after its source anchors are verified.
 - [x] Label unsupported upload formats in the UI until their adapters pass fixture checks.
 - [ ] Check historical quantity and unit-price anomalies using comparable records and explicit units.
