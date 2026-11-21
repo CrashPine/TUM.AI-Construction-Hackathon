@@ -12,6 +12,23 @@ BoQ data model. Checks, the risk report and the upload page do not exist yet.
 
 ## Local PDF contradiction review
 
+Start the web prototype without a model:
+
+```powershell
+uv sync --locked
+uv run python -m boqcheck.web
+```
+
+Open `http://127.0.0.1:8000` and upload `data/raw/LV_09_Porenbetondach.pdf`. The review shows
+both excerpts and links to the annotated source. Set the review status, edit the Bieterfrage, and
+save the changes before opening the risk report. The report includes a standalone HTML download
+and a print action which opens the browser's Save as PDF dialog.
+
+Review state and generated files are available for the lifetime of the local server. Download
+the report, annotated PDF or log before stopping it.
+
+### Command-line review
+
 ```powershell
 uv sync --locked
 uv run python -m boqcheck.review_pdf "data/raw/LV_09_Porenbetondach.pdf" "runs/roof-review"

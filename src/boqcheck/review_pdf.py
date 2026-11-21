@@ -48,7 +48,7 @@ def review_pdf(
     :param pdf_bytes: complete PDF contents.
     :param output: path to a new run directory.
     :param semantic: optional semantic checker connection and comparison budget.
-    :returns: run status, artifact paths, candidate count and coverage warnings.
+    :returns: run status, artifact paths, structured findings and coverage warnings.
     :raises ValueError: if the input is not a readable, unencrypted PDF.
     :raises FileExistsError: if the output directory already exists.
     :raises RuntimeError: if the output fails verification.
@@ -76,6 +76,7 @@ def review_pdf(
                 ):
                     findings.append(candidate)
         details = []
+        records = []
         expected: Counter[tuple[int, str, str, str]] = Counter()
         for number, finding in enumerate(findings, 1):
             identifier = f"BG-{number:03d}"
@@ -83,6 +84,23 @@ def review_pdf(
                 "Widerspruchskandidat" if finding.status == "conflict" else "Klärungsbedarf"
             )
             method = "Semantische Modellprüfung" if finding.kind == "semantic" else "Regelprüfung"
+            records.append(
+                {
+                    "id": identifier,
+                    "assessment": assessment,
+                    "method": method,
+                    "explanation": finding.explanation,
+                    "question": finding.question,
+                    "sources": [
+                        {
+                            "page": passage[0].page + 1,
+                            "reference": _reference(passage),
+                            "excerpt": _excerpt(passage),
+                        }
+                        for passage in finding.passages
+                    ],
+                }
+            )
             section = [
                 f"## {identifier} · {assessment}",
                 "",
@@ -166,6 +184,7 @@ def review_pdf(
         "annotated_pdf": str(output / pdf_name),
         "findings_log": str(output / log_name),
         "candidates": len(findings),
+        "findings": records,
         "semantic_coverage": coverage,
         "warnings": warnings,
     }
