@@ -13,11 +13,13 @@ for detailed annotation and Ollama verification.
 - [x] **Local web flow.** Upload one PDF, display both evidence passages, confirm or dismiss
   a finding, edit its German Bieterfrage, and export a print-ready HTML risk report. Verify with
   the roof LV and the model disabled. Keep the existing annotated PDF and log available.
-- [ ] **Next: X83 import and validation.** Extend metadata and warnings, explicitly reject DTDs
+- [x] **X83 import and validation.** Extend metadata and warnings, explicitly reject DTDs
   and entities, and finish price-field
   handling including missing versus zero and unit-price basis.
-- [ ] Add structural checks for duplicate OZ, invalid numeric values and required fields. Verify
+- [x] Add structural checks for duplicate OZ, invalid numeric values and required fields. Verify
   deterministic arithmetic on priced positions with a known price basis. Empty X83 prices are normal.
+  The four real X83 samples are unpriced. Arithmetic was verified with explicit fields in synthetic
+  XML. Priced GAEB phase adapters remain open.
 - [ ] Prepare the 90-second estimator demo after the web flow works.
 
 ## Additional analysis and formats

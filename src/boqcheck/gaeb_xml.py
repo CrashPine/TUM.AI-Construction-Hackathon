@@ -1,5 +1,6 @@
 """Parser for GAEB DA XML bills of quantities (X83 files)."""
 
+import re
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from decimal import Decimal
@@ -8,6 +9,25 @@ from boqcheck.model import BoQ, Item, Section
 
 SHORT_TEXT = "Description/CompleteText/OutlineText/OutlTxt/TextOutlTxt"
 LONG_TEXT = "Description/CompleteText/DetailTxt"
+_VERSIONS = {
+    "http://www.gaeb.de/GAEB_DA_XML/200407": "3.1",
+    "http://www.gaeb.de/GAEB_DA_XML/DA83/3.2": "3.2",
+}
+_DECIMAL = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)")
+
+
+class _WithoutDTD(ET.TreeBuilder):
+    """Build XML without processing document type declarations."""
+
+    def doctype(self, name: str, pubid: str | None, system: str | None) -> None:
+        """Reject DTDs, including those that contain entity declarations.
+
+        :param name: document type name.
+        :param pubid: optional public identifier.
+        :param system: optional system identifier.
+        :raises ValueError: always, because DTDs are unsupported.
+        """
+        raise ValueError("DTD and entity declarations are not allowed")
 
 
 def parse_gaeb_xml(data: bytes, source: str) -> BoQ:
@@ -17,12 +37,13 @@ def parse_gaeb_xml(data: bytes, source: str) -> BoQ:
     :param source: the file name, for the result and for error messages.
     :returns: the BoQ with its sections and items in document order.
     :raises ValueError: if the data is not well-formed XML or has no GAEB Award/BoQ element, if a
-        BoQBkdn element has no Length, or if no BoQBkdn element has the Type Item.
+        BoQBkdn element has no Length, if no BoQBkdn element has the Type Item, or for DTDs.
     """
     try:
-        root = ET.fromstring(data)
+        root = ET.fromstring(data, parser=ET.XMLParser(target=_WithoutDTD()))
     except ET.ParseError as error:
         raise ValueError(f"{source}: not well-formed XML: {error}") from error
+    namespace = root.tag[1:].partition("}")[0] if root.tag.startswith("{") else None
     # GAEB 3.1 and 3.2 use different namespaces for the same local names.
     for element in root.iter():
         element.tag = element.tag.rpartition("}")[2]
@@ -37,11 +58,30 @@ def parse_gaeb_xml(data: bytes, source: str) -> BoQ:
     # A Lot (Los) is the top section level, above the BoQLevel entries.
     level_widths = [int(length) for kind, length in breakdown if kind in ("Lot", "BoQLevel")]
     entries = list(_entries(boq, (), level_widths, int(dict(breakdown)["Item"])))
+    expected_version = _VERSIONS.get(namespace)
+    version = root.findtext("GAEBInfo/Version", "").strip() or expected_version
+    phase = root.findtext("Award/DP", "").strip() or None
+    warnings = []
+    if expected_version is None or version != expected_version:
+        warnings.append("Unverified GAEB XML namespace or version; import may be incomplete.")
+    if phase != "83":
+        warnings.append("Only phase 83 (X83) is verified by this importer.")
+    skipped = {"AddText", "Remark", "PerfDescr", "RefDescr", "RefRNo"}
+    present = sorted({element.tag for element in root.iter() if element.tag in skipped})
+    if present:
+        warnings.append(f"Content not imported: {', '.join(present)}.")
+    items = tuple(entry for entry in entries if isinstance(entry, Item))
+    if any(item.unit_price is not None or item.line_total is not None for item in items):
+        warnings.append("Price fields were read as extensions; standard X83 is unpriced.")
     return BoQ(
         source=source,
-        phase=root.findtext("Award/DP", "").strip() or None,
+        phase=phase,
         sections=tuple(entry for entry in entries if isinstance(entry, Section)),
-        items=tuple(entry for entry in entries if isinstance(entry, Item)),
+        items=items,
+        version=version,
+        namespace=namespace,
+        version_date=root.findtext("GAEBInfo/VersDate", "").strip() or None,
+        warnings=tuple(warnings),
     )
 
 
@@ -68,10 +108,15 @@ def _entries(
     for item in parent.iterfind("BoQBody/Itemlist/Item"):
         if item.findtext("NotAppl") == "Yes":
             continue
-        quantity = item.findtext("Qty", "").strip()
-        number = item.get("RNoPart").zfill(item_width) + item.get("RNoIndex", "")
+        number = (item.get("RNoPart") or "").strip()
+        invalid: list[tuple[str, str]] = []
+        parsed = {
+            name: _read_decimal(item, name, invalid) for name in ("Qty", "UP", "PriceBasis", "IT")
+        }
         yield Item(
-            oz=".".join((*prefix, number)),
+            oz=".".join((*prefix, number.zfill(item_width) + item.get("RNoIndex", "")))
+            if number
+            else "",
             short_text=_text(item.find(SHORT_TEXT)),
             # DetailTxt interleaves Text with TextComplement (owner text, bidder blanks).
             # Sub-descriptions (Unterbeschreibungen) are part of the scope; the label line
@@ -84,11 +129,35 @@ def _entries(
                     for sub in item.iterfind("SubDescr")
                 ]
             ),
-            quantity=Decimal(quantity) if quantity else None,
+            quantity=parsed["Qty"],
             unit=item.findtext("QU", ""),
             provisional=item.find("Provis") is not None,
             lump_sum=item.findtext("LumpSumItem") == "Yes",
+            unit_price=parsed["UP"],
+            price_basis=parsed["PriceBasis"],
+            line_total=parsed["IT"],
+            invalid_numbers=tuple(invalid),
+            adjusted_total=any(
+                item.find(tag) is not None for tag in ("DiscountPcnt", "RedPriceComp")
+            ),
         )
+
+
+def _read_decimal(item: ET.Element, name: str, invalid: list[tuple[str, str]]) -> Decimal | None:
+    """Read a decimal and record an invalid value for structural checks.
+
+    :param item: item containing the field.
+    :param name: XML field name.
+    :param invalid: recipient for invalid raw values.
+    :returns: decimal value or None if absent or invalid.
+    """
+    raw = item.findtext(name, "").strip()
+    if not raw:
+        return None
+    if len(raw) <= 64 and _DECIMAL.fullmatch(raw):
+        return Decimal(raw)
+    invalid.append((name, raw))
+    return None
 
 
 def _text(markup: ET.Element | None) -> str:

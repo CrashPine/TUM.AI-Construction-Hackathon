@@ -64,6 +64,19 @@ the document when the budget cannot cover every window.
 The log reports completed comparisons and which physical PDF pages supplied all, some, or none
 of their extracted lines. It preserves deterministic findings when the model is unavailable.
 
+## GAEB X83 validation
+
+```powershell
+uv run python -m boqcheck.gaeb_checks "data/raw/GAEB-[PROJEKT_004].X83"
+```
+
+The JSON report lists importer warnings and position findings with their OZ and item number.
+An X83 without prices is valid for this check. If a file explicitly supplies `UP`, `PriceBasis`
+and `IT` as item extensions, the checker compares the rounded total for standard unit-priced
+items with a known quantity and unit. It skips totals with missing operands or explicit discounts.
+The official X83 and X84 schemas are available from
+[GAEB](https://www.gaeb.de/de/service/downloads/gaeb-datenaustausch/).
+
 ## Challenge
 
 **Problem.** Bills of quantities often contain thousands of line items, multiple cost groups and
