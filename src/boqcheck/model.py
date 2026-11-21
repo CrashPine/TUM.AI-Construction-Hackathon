@@ -10,10 +10,12 @@ class Section:
 
     :ivar oz: the full Ordnungszahl, levels joined by ".", for example "01.02".
     :ivar title: the section label.
+    :ivar total: the section total the file states, or None if it states none.
     """
 
     oz: str
     title: str
+    total: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,8 @@ class Item:
     :ivar unit: the unit (ME) as the file writes it, for example "m3", "m³" or "Stk.".
     :ivar provisional: True for a Bedarfsposition (provisional item).
     :ivar lump_sum: True for a lump-sum item (Pauschalposition).
+    :ivar unit_price: the unit price (Einheitspreis, EP), or None if the file gives none.
+    :ivar total: the line total (Gesamtbetrag, GB), or None if the file gives none.
     """
 
     oz: str
@@ -38,6 +42,8 @@ class Item:
     unit: str
     provisional: bool = False
     lump_sum: bool = False
+    unit_price: Decimal | None = None
+    total: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -48,9 +54,11 @@ class BoQ:
     :ivar phase: the GAEB exchange phase, for example "83" (bid request), or None if unknown.
     :ivar sections: the sections in document order.
     :ivar items: the items in document order.
+    :ivar total: the net total of the BoQ the file states, or None if it states none.
     """
 
     source: str
     phase: str | None
     sections: tuple[Section, ...]
     items: tuple[Item, ...]
+    total: Decimal | None = None

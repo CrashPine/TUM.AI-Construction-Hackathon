@@ -34,7 +34,9 @@ the others as `EUR`.
 | `[ORT_024] LV24069.D86` | 86 | 197 | 197 | cp850 |
 
 Phase: columns 11-12 of the header record `00`. Code page: the decoding that gives German umlauts.
-`StBALV23040.D84` has no item texts, only price records.
+`StBALV23040.D84` has no item texts, only price records; `parse()` rejects it.
+In `StBALV23040.D86` the stated totals of sections `08.01` and `08` exceed the sums of their
+items by 982.20, and OZ `08.01.0003` is missing.
 
 ## PDF (34 files)
 
