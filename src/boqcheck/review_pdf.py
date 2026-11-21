@@ -198,7 +198,7 @@ def review_pdf(
             if finding.kind == "calculation":
                 assessment = "Rechenabweichung"
                 method = "Modellformel mit lokaler Decimal-Prüfung"
-            if finding.kind in ("table_price", "section_total"):
+            if finding.kind in ("table_price", "section_total", "hierarchy_total"):
                 assessment = "Rechenabweichung"
             if id(finding) in origins:
                 method += " · Historischer Modell-Treffer"
@@ -226,6 +226,10 @@ def review_pdf(
                 "table_price": ("Positionsbetrag", "Die Abweichung kann die Angebotssumme ändern."),
                 "section_total": (
                     "Abschnittssumme",
+                    "Die Abweichung kann die Angebotssumme ändern.",
+                ),
+                "hierarchy_total": (
+                    "Summenhierarchie",
                     "Die Abweichung kann die Angebotssumme ändern.",
                 ),
                 "calculation": ("Positionsbetrag", "Die Abweichung kann die Angebotssumme ändern."),
@@ -267,6 +271,8 @@ def review_pdf(
                 records[-1]["evidence"] = (
                     "Ausgewiesene Abschnittssumme und zugehörige Positionsbeträge"
                 )
+            if finding.kind == "hierarchy_total":
+                records[-1]["evidence"] = "Ausgewiesene Summe und ausgewiesene Teilsummen"
             if finding.spelling:
                 token, correction, start, end = finding.spelling
                 records[-1].update(
