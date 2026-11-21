@@ -1,11 +1,14 @@
 """Check a typed model proposal through PDF extraction, validation and export."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pymupdf
 import pytest
 
 from boqcheck import semantic
+from boqcheck.pdf_extract import extract
+from boqcheck.price_table import table_prices
 from boqcheck.review_pdf import review_pdf
 from boqcheck.semantic import SemanticConfig
 
@@ -75,3 +78,19 @@ def test_price_review(
         assert len(finding["sources"]) == 3
         assert "12.35 EUR" in finding["explanation"]
         assert "12.34 EUR" in Path(tmp_path / "out/price.contradictions.md").read_text("utf8")
+
+
+def test_real_ep_gp_table() -> None:
+    """Verify real table geometry and detect a changed total in memory."""
+    path = Path(__file__).resolve().parents[1] / "data/raw/Angebot AN24-0305.pdf"
+    with pymupdf.open(path) as document:
+        pages, _ = extract(document)
+    findings, coverage = table_prices(pages)
+    assert not findings
+    assert "274/274" in coverage
+    page = pages[2]
+    index = next(i for i, line in enumerate(page) if line.text == "4.800,00")
+    page[index] = replace(page[index], text="4.800,01")
+    findings, _ = table_prices([page])
+    (finding,) = findings
+    assert "4800.01" in finding.explanation and "4800.00" in finding.explanation

@@ -52,7 +52,8 @@ verification.
 - [x] Evaluate model-proposed PDF line-price formulas for adjacent labelled quantity, explicit
   unit-price basis and stated total in one OZ. Ground operands in source lines, round to cents
   and report checked versus unresolved labelled totals.
-- [ ] Extend PDF arithmetic to table layouts, numerical token roles beyond labelled price fields,
+- [x] Recalculate aligned EUR EP/GP table rows without a model. Verified 274 rows in the priced D84 companion PDF and detected a one-cent change in memory.
+- [ ] Extend PDF arithmetic to other table layouts, numerical token roles beyond labelled price fields,
   unit conversions and subtotal membership including optional items.
 - [x] Import GAEB 90 D84, D83 and D86 through the parser. Fixture tests cover counts, prices and OZs.
 - [ ] Connect GAEB 90 to the web review and add supporting DOCX and mapped XLSX imports with evidence.
