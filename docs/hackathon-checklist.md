@@ -54,8 +54,9 @@ verification.
   and report checked versus unresolved labelled totals.
 - [x] Recalculate aligned EUR EP/GP table rows without a model. Verified 274 rows in the priced D84 companion PDF and detected a one-cent change in memory.
 - [x] Recalculate the second priced PDF layout with a separate unit column and carry-over positions. Verified all 248 recognised items in Abgabe LV.pdf and a one-cent change across a page break.
+- [x] Reconcile source-backed section subtotals in both priced PDFs (14 explicit section totals and 23 keyed summary rows). Count unresolved optional membership as unchecked. Test explicit inclusion, exclusion and a one-cent error.
 - [ ] Extend PDF arithmetic to other table layouts, numerical token roles beyond labelled price fields,
-  unit conversions and subtotal membership including optional items.
+  unit conversions and other subtotal layouts.
 - [x] Import GAEB 90 D84, D83 and D86 through the parser. Fixture tests cover counts, prices and OZs.
 - [ ] Connect GAEB 90 to the web review and add supporting DOCX and mapped XLSX imports with evidence.
 - [ ] Accept a supporting DOCX in the same LV review after its source anchors are verified.

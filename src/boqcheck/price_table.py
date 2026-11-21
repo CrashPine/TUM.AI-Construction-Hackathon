@@ -7,6 +7,7 @@ from decimal import ROUND_HALF_UP, Decimal, localcontext
 from .contradictions import Finding
 from .pdf_calculation import _NUMBER
 from .pdf_extract import Line
+from .pdf_subtotals import SectionTotals
 
 
 def table_prices(pages: list[list[Line]]) -> tuple[list[Finding], str]:
@@ -18,6 +19,10 @@ def table_prices(pages: list[list[Line]]) -> tuple[list[Finding], str]:
     findings = []
     checked = eligible = 0
     position = None
+    sections = SectionTotals()
+    split_sections: dict[str, SectionTotals] = {}
+    active_split = None
+    summary_checked = summary_stated = 0
     for page in pages:
         rows: list[list[Line]] = []
         for line in sorted(page, key=lambda cell: cell.quad.rect.y0):
@@ -27,6 +32,7 @@ def table_prices(pages: list[list[Line]]) -> tuple[list[Finding], str]:
         columns = None
         split_header = None
         split = False
+        summary = False
         for row in rows:
             row = sorted(row, key=lambda line: line.quad.rect.x0)
             texts = [line.text for line in row]
@@ -59,6 +65,49 @@ def table_prices(pages: list[list[Line]]) -> tuple[list[Finding], str]:
                     columns = [headers[i].quad.rect for i in (0, 1, 3, 5)]
                 continue
             cells = row
+            if split and texts == ["Zusammenstellung"]:
+                summary = True
+                continue
+            if summary:
+                if (
+                    re.fullmatch(r"\d+\.\d+", texts[0])
+                    and abs(cells[0].quad.rect.x0 - split_header[0].quad.rect.x0) < 5
+                ):
+                    summary_stated += 1
+                    section = split_sections.get(texts[0])
+                    amounts = [
+                        cell
+                        for cell in page
+                        if abs(cell.quad.rect.y0 - cells[0].quad.rect.y0) <= 1.25
+                        and abs(cell.quad.rect.x1 - split_header[-1].quad.rect.x1) < 10
+                        and len(cell.text) <= 18
+                        and re.fullmatch(_NUMBER, cell.text)
+                    ]
+                    if section and len(amounts) == 1:
+                        previous = section.checked
+                        section.reconcile([cells[0], amounts[0]])
+                        summary_checked += section.checked - previous
+                continue
+            if split or columns is not None:
+                left = split_header[0].quad.rect.x0 if split else columns[0].x0
+                right = split_header[-1].quad.rect.x1 if split else columns[-1].x1
+                if (
+                    split
+                    and re.fullmatch(r"\d+\.\d+", texts[0])
+                    and abs(cells[0].quad.rect.x0 - left) < 5
+                ):
+                    section = SectionTotals()
+                    duplicate = texts[0] in split_sections
+                    if not duplicate:
+                        split_sections[texts[0]] = section
+                    else:
+                        split_sections[texts[0]].ambiguous = True
+                    section.observe(row, split, left, right)
+                    active_split = section
+                elif split and active_split is not None:
+                    active_split.observe(row, split, left, right)
+                elif not split:
+                    sections.observe(row, split, left, right)
             is_position = re.fullmatch(r"\d+(?:\.\d+){2,}[A-Za-z]?", cells[0].text)
             if split:
                 first, qty_head, unit_head, price_head, total_head = split_header
@@ -102,6 +151,9 @@ def table_prices(pages: list[list[Line]]) -> tuple[list[Finding], str]:
                 context.prec = 50
                 expected = (qty * price).quantize(Decimal(".01"), rounding=ROUND_HALF_UP)
             checked += 1
+            ledger = active_split if split else sections
+            if ledger and ledger.section and oz in ledger.amounts:
+                ledger.amounts[oz] = (actual, replace(cells[-1], oz=oz))
             if actual != expected:
                 findings.append(
                     Finding(
@@ -115,4 +167,16 @@ def table_prices(pages: list[list[Line]]) -> tuple[list[Finding], str]:
                 )
         if not split:
             position = None
-    return findings, f"EP/GP-Tabellen: {checked}/{eligible} erkannte Positionszeilen geprüft."
+        if not split and columns is None:
+            sections.section = ""
+            if active_split:
+                active_split.ambiguous = True
+                active_split = None
+    findings.extend(sections.findings)
+    for section in split_sections.values():
+        findings.extend(section.findings)
+    return findings, (
+        f"EP/GP-Tabellen: {checked}/{eligible} erkannte Positionszeilen geprüft. "
+        f"Abschnittssummen: {sections.checked + summary_checked}/"
+        f"{sections.stated + summary_stated} geprüft."
+    )
