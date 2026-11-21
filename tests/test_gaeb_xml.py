@@ -1,4 +1,4 @@
-"""Tests for the GAEB DA XML parser and the parse entry point, on the sample files."""
+"""Tests for the GAEB DA XML parser and the parse entry point, on sample files and synthetic XML."""
 
 import functools
 from pathlib import Path
@@ -14,12 +14,8 @@ SAS = "501-24-01_GAEB-XML_sas.x83"
 LEER = "8209.003_Leistungsverzeichnis_leer.X83"
 PROJEKT = "GAEB-[PROJEKT_004].X83"
 NUMMER = "[NUMMER_001]_leer.X83"
-
-MINIMAL = b"""<GAEB xmlns="http://www.gaeb.de/GAEB_DA_XML/DA83/3.2"><Award><BoQ>
-<BoQInfo><BoQBkdn><Type>BoQLevel</Type><Length>2</Length></BoQBkdn>
-<BoQBkdn><Type>Item</Type><Length>4</Length></BoQBkdn></BoQInfo>
-<BoQBody><BoQCtgy RNoPart="1"><BoQBody><Itemlist><Item RNoPart="7"/></Itemlist></BoQBody>
-</BoQCtgy></BoQBody></BoQ></Award></GAEB>"""
+LEVEL = "<BoQBkdn><Type>BoQLevel</Type><Length>2</Length></BoQBkdn>"
+ITEM = "<BoQBkdn><Type>Item</Type><Length>4</Length></BoQBkdn>"
 
 
 @functools.cache
@@ -30,6 +26,20 @@ def _boq(name: str) -> BoQ:
     :returns: the parsed BoQ.
     """
     return parse(name, (RAW / name).read_bytes())
+
+
+def _xml(body: str, breakdown: str = LEVEL + ITEM, dp: str = "83") -> bytes:
+    """Build a synthetic GAEB DA XML 3.2 document.
+
+    :param body: the elements after BoQInfo in the BoQ element, usually a BoQBody.
+    :param breakdown: the BoQBkdn elements.
+    :param dp: the text of Award/DP.
+    :returns: the document.
+    """
+    return (
+        f'<GAEB xmlns="http://www.gaeb.de/GAEB_DA_XML/DA83/3.2"><Award><DP>{dp}</DP><BoQ>'
+        f"<BoQInfo>{breakdown}</BoQInfo>{body}</BoQ></Award></GAEB>"
+    ).encode()
 
 
 @pytest.mark.parametrize(
@@ -77,6 +87,40 @@ def test_oz_padded_to_breakdown_widths(name: str, second_section: str, first_ite
     assert (boq.sections[1].oz, boq.items[0].oz) == (second_section, first_item)
 
 
+@pytest.mark.parametrize(
+    ("breakdown", "body", "ozs"),
+    [
+        (
+            "<BoQBkdn><Type>Lot</Type><Length>1</Length></BoQBkdn>" + LEVEL + ITEM,
+            '<BoQBody><BoQCtgy RNoPart="1"><BoQBody><BoQCtgy RNoPart="2"><BoQBody><Itemlist>'
+            '<Item RNoPart="3" RNoIndex="A"/></Itemlist></BoQBody></BoQCtgy></BoQBody></BoQCtgy>'
+            "</BoQBody>",
+            ["1", "1.02", "1.02.0003A"],
+        ),
+        (
+            LEVEL + ITEM,
+            '<BoQBody><BoQCtgy RNoPart="1"><NotApplBoQ>Yes</NotApplBoQ><BoQBody><Itemlist>'
+            '<Item RNoPart="1"/></Itemlist></BoQBody></BoQCtgy><BoQCtgy RNoPart="2"><BoQBody>'
+            '<Itemlist><Item RNoPart="1"><NotAppl>Yes</NotAppl></Item><Item RNoPart="2"/>'
+            "</Itemlist></BoQBody></BoQCtgy></BoQBody>",
+            ["02", "02.0002"],
+        ),
+        (LEVEL + ITEM, "", []),
+        (LEVEL + ITEM, '<BoQBody><BoQCtgy RNoPart="1"/></BoQBody>', ["01"]),
+    ],
+    ids=["lot-and-index", "not-applicable", "boq-without-body", "section-without-body"],
+)
+def test_structure(breakdown: str, body: str, ozs: list[str]):
+    """Lot widths, index letters, Entfällt marks and missing BoQBody elements give the right OZs.
+
+    :param breakdown: the BoQBkdn elements.
+    :param body: the elements after BoQInfo in the BoQ element.
+    :param ozs: the expected OZs of the sections, then of the items.
+    """
+    boq = parse_gaeb_xml(_xml(body, breakdown), "synthetic.X83")
+    assert [entry.oz for entry in (*boq.sections, *boq.items)] == ozs
+
+
 def test_quantity_and_unit_as_written():
     """Qty keeps the digits of the file and QU is not normalized."""
     item = next(item for item in _boq(LEER).items if item.oz == "02.02.0001")
@@ -96,10 +140,15 @@ def test_short_text_and_title():
         (PROJEKT, "01.0001", "sämtliche\nin der"),  # br inside a paragraph
         (SAS, "01.01.0001", "die zur\nvertragsgemäßen"),  # paragraph end in pretty-printed XML
         (LEER, "03.01.0001", "Hersteller Pumpe: '."),  # TextComplement; a tab before the quote
+        (LEER, "01.01.0002", "als Symbol,\nRohrleitungen,"),  # list items: ul/li/p
+        (NUMMER, "07.01.0007", "EN 489.\nUnterbeschreibung 1:\nFertigabzweig,"),  # SubDescr
+        (NUMMER, "07.01.0007", "EN 448\nUnterbeschreibung 2:\nAnschlussrohrleitung\nELE"),
     ],
 )
 def test_long_text(name: str, oz: str, fragment: str):
-    """The Langtext has a line per paragraph and br, single spaces and the text complements.
+    """The long text has a line per paragraph and br, single spaces and the text complements.
+
+    Each sub-description follows with its number, its Kurztext and its Langtext.
 
     :param name: the sample file.
     :param oz: the OZ of the item.
@@ -109,18 +158,38 @@ def test_long_text(name: str, oz: str, fragment: str):
     assert fragment in item.long_text
 
 
-def test_item_without_quantity_unit_or_texts():
-    """An Item without Qty, QU and Description parses, so that checks can report the gaps."""
-    item = parse_gaeb_xml(MINIMAL, "minimal.X83").items[0]
-    assert item == Item(oz="01.0007", short_text="", long_text="", quantity=None, unit="")
+@pytest.mark.parametrize("qty", ["", "<Qty/>", "<Qty> </Qty>"])
+def test_item_without_quantity_unit_or_texts(qty: str):
+    """An Item without QU and texts, and without Qty or with an empty one, parses with empty values.
+
+    :param qty: the Qty element of the item, if any.
+    """
+    body = f'<BoQBody><Itemlist><Item RNoPart="7">{qty}</Item></Itemlist></BoQBody>'
+    item = parse_gaeb_xml(_xml(body), "synthetic.X83").items[0]
+    assert item == Item(oz="0007", short_text="", long_text="", quantity=None, unit="")
+
+
+@pytest.mark.parametrize("dp", ["", " "])
+def test_empty_phase_is_none(dp: str):
+    """An empty or blank Award/DP gives the phase None.
+
+    :param dp: the text of Award/DP.
+    """
+    assert parse_gaeb_xml(_xml("", dp=dp), "synthetic.X83").phase is None
 
 
 @pytest.mark.parametrize(
     ("data", "message"),
-    [(b"%PDF-1.7", "not well-formed XML"), (b"<html/>", "no Award/BoQ element")],
+    [
+        (b"%PDF-1.7", "not well-formed XML"),
+        (b"<html/>", "no Award/BoQ element"),
+        (_xml("", LEVEL), "invalid BoQBkdn"),
+        (_xml("", "<BoQBkdn><Type>Item</Type></BoQBkdn>"), "invalid BoQBkdn"),
+    ],
+    ids=["pdf", "html", "no-item-entry", "no-length"],
 )
 def test_rejects_other_data(data: bytes, message: str):
-    """Data that is not a GAEB DA XML BoQ raises ValueError with a clear message.
+    """Data that is not a usable GAEB DA XML BoQ raises ValueError with a clear message.
 
     :param data: the file content.
     :param message: a part of the expected error message.
