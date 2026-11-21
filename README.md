@@ -233,3 +233,7 @@ also supply `quantity`, `price` and `price_basis` as applicable. The current
 quantity, price and price basis come from the XLSX. The web report requires
 three distinct comparable projects for a reference range. See
 `test_historical_comparison_export` in `tests/test_web.py` for a synthetic example.
+For semantic peer selection, add a top-level `embedding_model` naming an installed
+Ollama embedding model and a `description` for each peer. Set `embedding_port`
+(default 11434) and `similarity` (default 0.75) if needed. Requests stay on loopback.
+The report shows unavailable retrieval if the local service fails.

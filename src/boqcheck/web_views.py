@@ -308,6 +308,8 @@ def _history_comparison(result: dict, report: bool) -> str:
         if not report:
             label = f'<a href="#position-{entry["position"]}">{label}</a>'
         parts.append(f"<h3>{label}</h3>")
+        if entry["retrieval"]:
+            parts.append(f"<p>{escape(entry['retrieval'])}</p>")
         for key, label in (("quantity", "Menge"), ("unit_price", "Einheitspreis")):
             comparison = entry["results"][key]
             parts.append(f"<p><b>{label}:</b> {statuses[comparison['status']]}</p>")
