@@ -11,6 +11,7 @@
 - [x] Review the shaft LV excerpt from file pages 2 and 5 (printed 53 and 56). Ollama completed all three comparisons. The exported candidate retained the built-in rule's 8 mm versus 15 mm finding, with reciprocal comments on both pages.
 - [x] Run a live negative control where opposite states apply to two different switches. Ollama completed the comparison and the review returned zero findings.
 - [x] Run and manually review the two waterproofing LVs with Ollama. Both outputs preserved the source pages. Neither the model nor the rules returned a candidate.
+- [x] Run a model-only control on both shaft LV pages with the known 8 mm versus 15 mm discrepancy. Both clauses were in the first comparison. Ollama completed 3/3 comparisons and returned zero candidates. Keep deterministic checks enabled for the hackathon demo.
 - [ ] Verify on a broader set of real PDFs whether the model identifies contradictions beyond the built-in rules. Report missed expected findings and false positives.
 - [x] Spread a small model budget across the document and log coverage by physical PDF page. Verified on the 91-page `Abgabe LV.pdf`: three requests covered excerpts near the start, middle and end of the file.
 - [x] Prioritize likely cross-page conflicts under a limited budget using shared OZ, explicit references and uncommon terms. In a live two-request run, Ollama found the conflict spanning pages 1 and 7 of the synthetic PDF and exported both annotated passages.
