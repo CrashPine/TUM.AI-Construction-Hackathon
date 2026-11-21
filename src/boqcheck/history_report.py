@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .historical_comparison import HistoricalPosition, compare_history
 from .history_embeddings import similar_rows
+from .history_ingest import workbook_peers
 from .model import Item
 
 _NUMBERS = {"quantity", "scale", "price", "price_basis"}
@@ -57,7 +58,8 @@ def load_dataset(path: Path) -> HistoryDataset:
         model = data.get("embedding_model", "")
         port = data.get("embedding_port", 11434)
         threshold = float(data.get("similarity", 0.75))
-        descriptions = tuple(row.get("description", "") for row in data["peers"])
+        peers = [*data.get("peers", []), *workbook_peers(path.parent, data.get("projects", []))]
+        descriptions = tuple(row.get("description", "") for row in peers)
         if (
             not isinstance(model, str)
             or type(port) is not int
@@ -71,7 +73,7 @@ def load_dataset(path: Path) -> HistoryDataset:
             data["sha256"],
             data["synthetic"],
             {oz: _position(row) for oz, row in data["current"].items()},
-            [_position(row) for row in data["peers"]],
+            [_position(row) for row in peers],
             descriptions,
             model,
             port,

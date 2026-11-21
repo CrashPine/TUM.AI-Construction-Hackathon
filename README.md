@@ -237,3 +237,9 @@ For semantic peer selection, add a top-level `embedding_model` naming an install
 Ollama embedding model and a `description` for each peer. Set `embedding_port`
 (default 11434) and `similarity` (default 0.75) if needed. Requests stay on loopback.
 The report shows unavailable retrieval if the local service fails.
+Instead of entering peer numbers in JSON, add a top-level `projects` array.
+Each entry contains `project` (independent project ID), `workbook` (relative XLSX
+path inside the manifest directory), and `positions` (object keyed by historical OZ).
+Use `defaults` for common metadata and per-position objects for overrides. Numbers,
+units and descriptions come from the workbook. Reports cite the workbook, sheet
+and physical row. Inline `peers` may still be supplied independently.
