@@ -19,10 +19,14 @@ uv sync --locked
 uv run python -m boqcheck.web
 ```
 
-Open `http://127.0.0.1:8000` and upload `data/raw/LV_09_Porenbetondach.pdf`. The review shows
+Open `http://127.0.0.1:8000` and upload `data/raw/LV_09_Porenbetondach.pdf`. The PDF review shows
 both excerpts and links to the annotated source. Set the review status, edit the Bieterfrage, and
 save the changes before opening the risk report. The report includes a standalone HTML download
 and a print action which opens the browser's Save as PDF dialog.
+
+The same upload form accepts GAEB X83 (3.1 or 3.2). It shows normalized positions, structural
+findings and price-check coverage and exports the shared HTML report. GAEB 90, DOCX and XLSX
+are currently unsupported.
 
 Review state and generated files are available for the lifetime of the local server. Download
 the report, annotated PDF or log before stopping it.

@@ -84,11 +84,26 @@ def review_pdf(
                 "Widerspruchskandidat" if finding.status == "conflict" else "Klärungsbedarf"
             )
             method = "Semantische Modellprüfung" if finding.kind == "semantic" else "Regelprüfung"
+            category, impact = {
+                "scope_reference": (
+                    "Leistungsumfang",
+                    "Zeichnungen für das falsche Bauteil könnten in die Kalkulation eingehen.",
+                ),
+                "aggregate_limit": (
+                    "Materialanforderung",
+                    "Die geforderte Körnung wirkt sich auf die Materialkalkulation aus.",
+                ),
+            }.get(finding.kind, ("Widerspruch", "Siehe Begründung des Modellvorschlags."))
             records.append(
                 {
                     "id": identifier,
                     "assessment": assessment,
                     "method": method,
+                    "category": category,
+                    "evidence": "Zwei Textstellen; Anwendbarkeit offen"
+                    if finding.status != "conflict"
+                    else "Zwei Textstellen belegt",
+                    "impact": impact,
                     "explanation": finding.explanation,
                     "question": finding.question,
                     "sources": [

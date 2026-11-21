@@ -1,4 +1,4 @@
-"""Serve the local PDF upload, review state and printable report."""
+"""Serve local PDF and X83 uploads, review state and printable reports."""
 
 import argparse
 import re
@@ -10,10 +10,11 @@ from uuid import uuid4
 from wsgiref.simple_server import make_server
 
 from .review_pdf import review_pdf
+from .web_gaeb import review_x83
 from .web_views import STATUSES, review_view, upload_view
 
 _RUN = re.compile(r"/review/([a-f0-9]{32})(?:/(pdf|log|report))?")
-_MAX_PDF = 32 * 1024 * 1024
+_MAX_UPLOAD = 32 * 1024 * 1024
 
 
 def _read_body(env: dict, limit: int, *, media_type: str) -> bytes:
@@ -52,6 +53,23 @@ def _update(result: dict, fields: dict[str, list[str]]) -> None:
         finding.update(review_status=status, question=question)
 
 
+def _analyse(env: dict, name: str, output: Path) -> dict:
+    """Dispatch the upload to its analyzer using the original filename.
+
+    :param env: WSGI request environment.
+    :param name: uploaded filename.
+    :param output: path for PDF output files.
+    :returns: structured review result.
+    :raises ValueError: if the suffix is unsupported.
+    """
+    suffix = Path(name).suffix.lower()
+    if suffix == ".pdf":
+        return review_pdf(name, _read_body(env, _MAX_UPLOAD, media_type="application/pdf"), output)
+    if suffix == ".x83":
+        return review_x83(name, _read_body(env, _MAX_UPLOAD, media_type="application/xml"))
+    raise ValueError("Unterstützt werden PDF und GAEB X83.")
+
+
 def make_app(directory: Path) -> Callable:
     """Build the single-process WSGI application.
 
@@ -81,8 +99,7 @@ def make_app(directory: Path) -> Callable:
             elif method == "POST" and path == "/upload":
                 name = query.get("name", ["upload.pdf"])[0][:200]
                 identifier = uuid4().hex
-                data = _read_body(env, _MAX_PDF, media_type="application/pdf")
-                result = review_pdf(name, data, directory / identifier)
+                result = _analyse(env, name, directory / identifier)
                 for finding in result["findings"]:
                     finding["review_status"] = "open"
                 runs[identifier] = (name, result)
@@ -101,7 +118,9 @@ def make_app(directory: Path) -> Callable:
                     status = "303 See Other"
                     headers.append(("Location", base))
                 elif method == "GET" and subpage in ("pdf", "log"):
-                    if subpage == "pdf":
+                    if "annotated_pdf" not in result:
+                        status, body = "404 Not Found", "Datei nicht gefunden."
+                    elif subpage == "pdf":
                         content_type = "application/pdf"
                         body = Path(result["annotated_pdf"]).read_bytes()
                         headers.append(("Content-Disposition", 'inline; filename="annotated.pdf"'))

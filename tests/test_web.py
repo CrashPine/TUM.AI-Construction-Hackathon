@@ -1,4 +1,4 @@
-"""Verify the local web workflow with the real roof LV and no configured model."""
+"""Verify PDF and GAEB uploads through the local web workflow without a model."""
 
 from collections.abc import Callable
 from io import BytesIO
@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 from wsgiref.util import setup_testing_defaults
 
 import pymupdf
+import pytest
 
 from boqcheck.web import make_app
 
@@ -44,7 +45,8 @@ def test_upload_review_and_report(tmp_path: Path) -> None:
     :param tmp_path: isolated application artifact directory.
     """
     app = make_app(tmp_path)
-    assert b"PDF pr" in _request(app, "/")[2]
+    home = _request(app, "/")[2]
+    assert b"PDF oder GAEB X83" in home
     status, headers, _ = _request(
         app, f"/upload?name={_ROOF.name}", _ROOF.read_bytes(), "application/pdf"
     )
@@ -53,6 +55,7 @@ def test_upload_review_and_report(tmp_path: Path) -> None:
     page = _request(app, run)[2].decode()
     assert "OZ 9.2.3" in page and "OZ 9.2.4" in page
     assert "Porenbetonfassade" in page and "Porenbeton-Dachplatten" in page
+    assert "Kategorie: Leistungsumfang" in page and "Beleglage:" in page
     assert page.count("#page=1") == 2 and "kein Modell konfiguriert" in page
 
     question = "Sind Dach <und> Fassade im Preis enthalten?"
@@ -82,3 +85,59 @@ def test_invalid_upload_returns_error(tmp_path: Path) -> None:
     app = make_app(tmp_path)
     assert _request(app, "/upload", b"invalid", "application/pdf")[0].startswith("400")
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("name", "version", "count", "oz"),
+    [
+        ("501-24-01_GAEB-XML_sas.x83", "3.1", 296, "01.01.0001"),
+        ("GAEB-[PROJEKT_004].X83", "3.2", 50, "01.0001"),
+    ],
+)
+def test_real_x83_upload(tmp_path: Path, name: str, version: str, count: int, oz: str) -> None:
+    """Import real unpriced X83 files via the browser endpoint.
+
+    :param tmp_path: isolated application artifact directory.
+    :param name: fixture filename.
+    :param version: GAEB version declared by the fixture.
+    :param count: expected number of imported positions.
+    :param oz: representative normalized position number.
+    """
+    app = make_app(tmp_path)
+    data = _ROOF.with_name(name).read_bytes()
+    status, headers, _ = _request(
+        app, f"/upload?{urlencode({'name': name})}", data, "application/xml"
+    )
+    assert status.startswith("303")
+    run = headers["Location"]
+    page = _request(app, run)[2].decode()
+    assert f"GAEB {version} · Phase 83 · {count} Positionen" in page
+    assert page.count('<tr id="position-') == count
+    assert oz in page and "Langtext" in page
+    assert "Keine Preisangaben. Für X83 ist das zulässig." in page
+    assert "Keine aktiven Befunde." in page and "Annotiertes PDF" not in page
+    assert _request(app, run + "/pdf")[0].startswith("404")
+    assert "0 Gesamtbeträge geprüft" in _request(app, run + "/report")[2].decode()
+
+
+def test_x83_finding_links_to_both_positions(tmp_path: Path) -> None:
+    """Link a duplicate OZ finding to both source rows and include it in the report.
+
+    :param tmp_path: isolated application artifact directory.
+    """
+    data = b"""<GAEB xmlns="http://www.gaeb.de/GAEB_DA_XML/DA83/3.2">
+    <Award><DP>83</DP><BoQ><BoQInfo>
+    <BoQBkdn><Type>Item</Type><Length>4</Length></BoQBkdn>
+    </BoQInfo><BoQBody><Itemlist>
+    <Item RNoPart="1"><Qty>1</Qty><QU>m</QU></Item>
+    <Item RNoPart="0001"><Qty>2</Qty><QU>m</QU></Item>
+    </Itemlist></BoQBody></BoQ></Award></GAEB>"""
+    app = make_app(tmp_path)
+    status, headers, _ = _request(app, "/upload?name=items.x83", data, "application/xml")
+    assert status.startswith("303")
+    run = headers["Location"]
+    page = _request(app, run)[2].decode()
+    assert "Doppelte OZ" in page
+    assert "Kategorie: LV-Struktur" in page and "Auswirkung:" in page
+    assert 'href="#position-1"' in page and 'href="#position-2"' in page
+    assert "Doppelte OZ" in _request(app, run + "/report")[2].decode()

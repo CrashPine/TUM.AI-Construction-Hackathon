@@ -1,6 +1,8 @@
-"""Server-rendered German views for the local PDF review workflow."""
+"""Server-rendered German views for the local review workflow."""
 
 from html import escape
+
+from .model import Item
 
 STATUSES = {"open": "Offen", "confirmed": "Bestätigt", "dismissed": "Verworfen"}
 
@@ -16,6 +18,9 @@ textarea{width:100%;box-sizing:border-box}button,select,textarea,input{font:inhe
 button{cursor:pointer;background:#215438;color:white;border:0;border-radius:.3rem;
 padding:.5rem .9rem}button:disabled{opacity:.6;cursor:wait}
 .badge{font-size:.9rem;color:#465347}.actions{margin-top:1rem}.question{white-space:pre-wrap}
+.table{overflow:auto}table{border-collapse:collapse;width:100%}
+td,th{padding:.55rem;text-align:left;border-bottom:1px solid #d5ddd5}td{vertical-align:top}
+tr:target{background:#fbf2cf}details p{white-space:pre-wrap}
 @page{size:A4;margin:16mm}
 @media print{nav{display:none} :root,article{background:white;color:black}
 main{padding:0;max-width:none}article{break-inside:avoid}}
@@ -23,23 +28,25 @@ main{padding:0;max-width:none}article{break-inside:avoid}}
 
 _UPLOAD = """
 <form id="upload">
-  <label for="pdf">Leistungsverzeichnis als PDF</label>
-  <input id="pdf" type="file" accept=".pdf,application/pdf" required>
-  <div class="actions"><button>PDF prüfen</button></div>
+  <label for="lv">Leistungsverzeichnis als PDF oder GAEB X83</label>
+  <input id="lv" type="file" accept=".pdf,.x83,application/pdf" required>
+  <p class="badge">GAEB 90, DOCX und XLSX werden derzeit nicht unterstützt.</p>
+  <div class="actions"><button>Datei prüfen</button></div>
   <p id="progress" role="status"></p>
 </form>
 <script>
 const form = document.querySelector('#upload');
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const file = document.querySelector('#pdf').files[0];
+  const file = document.querySelector('#lv').files[0];
+  const type = file.name.toLowerCase().endsWith('.x83') ? 'application/xml' : 'application/pdf';
   const status = document.querySelector('#progress');
   const button = form.querySelector('button');
   button.disabled = true;
-  status.textContent = 'PDF wird geprüft …';
+  status.textContent = 'Datei wird geprüft …';
   try {
     const response = await fetch('/upload?name=' + encodeURIComponent(file.name), {
-      method: 'POST', headers: {'Content-Type': 'application/pdf'}, body: file
+      method: 'POST', headers: {'Content-Type': type}, body: file
     });
     if (!response.ok) throw new Error(await response.text());
     location.assign(response.url);
@@ -69,7 +76,7 @@ def _page(title: str, content: str) -> str:
 
 
 def upload_view() -> str:
-    """Render the single-PDF upload page.
+    """Render the single-file upload page.
 
     :returns: complete upload view.
     """
@@ -89,11 +96,16 @@ def _finding(base: str, finding: dict, report: bool) -> str:
     pieces = [
         f'<article id="{identifier}"><h2>{identifier} · {escape(finding["assessment"])}</h2>',
         f'<p class="badge">{escape(finding["method"])} · {STATUSES[status]}</p>',
+        f'<p class="badge">Kategorie: {escape(finding["category"])} · '
+        f"Beleglage: {escape(finding['evidence'])}</p>",
         f"<p>{escape(finding['explanation'])}</p>",
+        f"<p><strong>Mögliche Auswirkung:</strong> {escape(finding['impact'])}</p>",
     ]
     for source in finding["sources"]:
         ref = escape(source["reference"])
-        if not report:
+        if not report and "position" in source:
+            ref = f'<a href="#position-{source["position"]}">{ref}</a>'
+        elif not report:
             ref = (
                 f'<a href="{base}/pdf#page={source["page"]}" target="_blank" rel="noopener">'
                 f"{ref}</a>"
@@ -115,6 +127,32 @@ def _finding(base: str, finding: dict, report: bool) -> str:
         )
     pieces.append("</article>")
     return "".join(pieces)
+
+
+def _positions(items: tuple[Item, ...]) -> str:
+    """Render the normalized GAEB positions with finding anchors.
+
+    :param items: parsed positions in source order.
+    :returns: an HTML table with quantities, units and both description fields.
+    """
+    rows = []
+    for number, item in enumerate(items, 1):
+        description = escape(item.short_text)
+        if item.long_text:
+            description += (
+                f"<details><summary>Langtext</summary><p>{escape(item.long_text)}</p></details>"
+            )
+        qty = str(item.quantity) if item.quantity is not None else "–"
+        rows.append(
+            f'<tr id="position-{number}"><th scope="row">{escape(item.oz) or "–"}</th>'
+            f"<td>{description}</td><td>{escape(qty)}</td><td>{escape(item.unit) or '–'}</td></tr>"
+        )
+    return (
+        '<h2 id="positions">Positionen</h2><div class="table"><table><thead>'
+        "<tr><th>OZ</th><th>Leistung</th><th>Menge</th><th>ME</th></tr></thead><tbody>"
+        + "".join(rows)
+        + "</tbody></table></div>"
+    )
 
 
 def review_view(
@@ -143,13 +181,28 @@ def review_view(
             f"</button>{links}</nav>"
         )
     else:
+        sources = (
+            f'<a href="{base}/pdf">Annotiertes PDF</a><a href="{base}/log">Befundprotokoll</a>'
+            if "annotated_pdf" in result
+            else '<a href="#positions">Positionen</a>'
+        )
         content.append(
-            f'<nav><a href="/">Neue Prüfung</a><a href="{base}/pdf">Annotiertes PDF</a>'
-            f'<a href="{base}/log">Befundprotokoll</a>'
+            f'<nav><a href="/">Neue Prüfung</a>{sources}'
             f'<a href="{base}/report">Risikobericht</a></nav>'
         )
 
-    content.append(f'<p class="badge">Modellprüfung: {escape(result["semantic_coverage"])}</p>')
+    if gaeb := result.get("gaeb"):
+        version = escape(gaeb["version"] or "unbekannt")
+        phase = escape(gaeb["phase"] or "unbekannt")
+        content.append(
+            f'<p class="badge">GAEB {version} · Phase {phase} · {gaeb["items"]} Positionen</p>'
+            f"<p>Preisprüfung: {gaeb['arithmetic_checked']} Gesamtbeträge geprüft, "
+            f"{gaeb['arithmetic_skipped']} übersprungen.</p>"
+        )
+        if gaeb["arithmetic_checked"] == gaeb["arithmetic_skipped"] == 0:
+            content.append("<p>Keine Preisangaben. Für X83 ist das zulässig.</p>")
+    else:
+        content.append(f'<p class="badge">Modellprüfung: {escape(result["semantic_coverage"])}</p>')
     if result["warnings"]:
         content.append(
             "<ul>" + "".join(f"<li>{escape(w)}</li>" for w in result["warnings"]) + "</ul>"
@@ -176,4 +229,6 @@ def review_view(
                 else "<p>Keine Bieterfragen.</p>",
             ]
         )
+    elif gaeb:
+        content.append(_positions(result["positions"]))
     return _page("Risikobericht" if report else "Befunde prüfen", "".join(content))
