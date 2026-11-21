@@ -2,3 +2,9 @@
 .env
 .env.*
 !.env.example
+
+# Python and tools: virtual environment, bytecode and caches.
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
