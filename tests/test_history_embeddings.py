@@ -2,6 +2,9 @@
 
 from dataclasses import replace
 from decimal import Decimal
+from io import BytesIO
+from unittest.mock import Mock
+from urllib.error import HTTPError
 
 import pytest
 
@@ -72,12 +75,127 @@ def test_embedding_retrieval(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     [report] = report_history(dataset, items)
     assert "Projektvorauswahl: 3/4" in report["retrieval"]
-    assert "Ähnlichkeitssuche: 3/3" in report["retrieval"]
+    assert "(test, Schwelle 0.75): 3/3 ausgewählt." in report["retrieval"]
     assert report["results"]["quantity"]["status"] == "anomaly"
     monkeypatch.setattr(history_embeddings, "embed", raising_embedding)
     [report] = report_history(dataset, items)
-    assert "nicht verfügbar" in report["retrieval"]
+    assert "nicht verfügbar: lokaler Dienst nicht erreichbar" in report["retrieval"]
     assert report["results"]["quantity"]["status"] == "insufficient_evidence"
+
+
+def dataset_with(peers: list[HistoricalPosition], **changes: object) -> HistoryDataset:
+    r"""Build a dataset whose current roof deck has 100 m2 of roof.
+
+    :param peers: historical positions, each described as a roof deck.
+    :param \*\*changes: dataset fields to override.
+    :returns: synthetic dataset with the embedding model ``test``.
+    """
+    current = HistoricalPosition(
+        "new", "OZ 1", "roof", "deck", "m2", scale=Decimal(100), scale_unit="m2 roof"
+    )
+    dataset = HistoryDataset(
+        "test.xlsx", "", True, {"1": current}, peers, ("Roof deck",) * len(peers), "test"
+    )
+    return replace(dataset, **changes)
+
+
+def peer(project: str, unit: str = "m2", trade: str = "roof") -> HistoricalPosition:
+    """Return a historical roof deck position.
+
+    :param project: independent project ID.
+    :param unit: position unit.
+    :param trade: position trade.
+    :returns: peer with quantity 100 per 100 m2 of roof.
+    """
+    return HistoricalPosition(
+        project, "OZ 1", trade, "deck", unit, Decimal(100), Decimal(100), "m2 roof"
+    )
+
+
+def matching_embedding(model: str, port: int, texts: list[str]) -> list[tuple[float, ...]]:
+    """Return identical vectors so every submitted candidate is similar.
+
+    :param model: configured model.
+    :param port: configured loopback port.
+    :param texts: query followed by candidates.
+    :returns: one vector per text.
+    """
+    return [(1.0, 0.0)] * len(texts)
+
+
+ITEMS = (Item("1", "Roof deck", "", Decimal(100), "m2"),)
+
+
+def test_metadata_gate_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Count same-wording peers with another unit or trade and never select them.
+
+    :param monkeypatch: substitute the local embedding transport.
+    """
+    monkeypatch.setattr(history_embeddings, "embed", matching_embedding)
+    peers = [peer("a"), peer("b"), peer("c"), peer("d", unit="m"), peer("e", trade="road")]
+    [report] = report_history(dataset_with(peers), ITEMS)
+    assert report["retrieval"] == (
+        "Lokale Ähnlichkeitssuche (test, Schwelle 0.75): 3/3 ausgewählt, "
+        "2 Positionen mit anderem Gewerk, Umfang oder Einheit."
+    )
+    sources = report["results"]["quantity"]["peers"]
+    assert [entry["project"] for entry in sources] == ["a", "b", "c"]
+    [report] = report_history(dataset_with(peers[3:]), ITEMS)
+    assert report["retrieval"] == (
+        "Lokale Ähnlichkeitssuche (test, Schwelle 0.75): keine kompatiblen beschriebenen "
+        "Vergleichspositionen, 2 Positionen mit anderem Gewerk, Umfang oder Einheit."
+    )
+    assert report["results"]["quantity"]["status"] == "insufficient_evidence"
+
+
+def test_unprofiled_projects_and_unconfigured_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Report projects without a profile and say when no similarity search runs.
+
+    :param monkeypatch: substitute the local embedding transport.
+    """
+    monkeypatch.setattr(history_embeddings, "embed", matching_embedding)
+    peers = [peer("a"), peer("b"), peer("c")]
+    dataset = dataset_with(peers, current_profile="Roof", project_profiles={"a": "Roof"})
+    [report] = report_history(dataset, ITEMS)
+    assert report["retrieval"].startswith(
+        "Projektvorauswahl: 1/1 ausgewählt, 2 Projekte ohne Profil ausgeschlossen. "
+    )
+    [report] = report_history(dataset_with(peers, embedding_model=""), ITEMS)
+    assert (
+        report["retrieval"] == "Keine Ähnlichkeitssuche konfiguriert; Auswahl nur nach Metadaten."
+    )
+    assert len(report["results"]["quantity"]["peers"]) == 3
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (
+            HTTPError("u", 404, "", None, BytesIO(b'{"error":"model \\"test\\" not found"}')),
+            "Modell test nicht installiert",
+        ),
+        (
+            HTTPError("u", 404, "", None, BytesIO(b"page not found")),
+            "lokaler Dienst antwortete mit HTTP 404",
+        ),
+        (
+            HTTPError("u", 500, "", None, BytesIO(b"model not found")),
+            "lokaler Dienst antwortete mit HTTP 500",
+        ),
+        (TimeoutError(), "lokaler Dienst nicht erreichbar"),
+        (ValueError("Invalid embedding vector."), "ungültige Antwort des lokalen Dienstes"),
+    ],
+)
+def test_failure_reason(monkeypatch: pytest.MonkeyPatch, error: Exception, reason: str) -> None:
+    """Name the failure only as far as the response proves it.
+
+    :param monkeypatch: substitute the local embedding transport.
+    :param error: exception raised by the transport.
+    :param reason: expected reason in the report.
+    """
+    monkeypatch.setattr(history_embeddings, "embed", Mock(side_effect=error))
+    [report] = report_history(dataset_with([peer("a")]), ITEMS)
+    assert f"nicht verfügbar: {reason}." in report["retrieval"]
 
 
 def raising_embedding(*args: object) -> None:

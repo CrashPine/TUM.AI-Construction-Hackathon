@@ -248,7 +248,12 @@ metadata or on another basis. See
 For semantic peer selection, add a top-level `embedding_model` naming an installed
 Ollama embedding model and a `description` for each peer. Set `embedding_port`
 (default 11434) and `similarity` (default 0.75) if needed. Requests stay on loopback.
-The report shows unavailable retrieval if the local service fails.
+Only peers with the same trade, scope and unit enter the similarity search;
+the report counts the ones it gated out. Embeddings are computed per report, with
+no stored index. Each comparison states its retrieval provenance: model, threshold,
+selected/candidate counts, or why retrieval was unavailable (model not installed,
+HTTP error, service unreachable, invalid answer). Without `embedding_model` it says
+that peers were chosen by metadata only.
 Instead of entering peer numbers in JSON, add a top-level `projects` array.
 Each entry contains `project` (independent project ID), `workbook` (relative XLSX
 path inside the manifest directory), and `positions` (object keyed by historical OZ).
@@ -259,4 +264,4 @@ For a project-level shortlist before position matching, set `current_profile`
 to a project summary and `project_profiles` to an object mapping historical
 project IDs to their summaries. This requires `embedding_model`. Only projects
 with a supplied profile can enter the shortlist. The report shows coverage of
-both search stages.
+both search stages, including how many projects had no profile.
