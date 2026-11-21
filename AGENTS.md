@@ -17,16 +17,47 @@ Order of work, from the brief:
 3. Risk scoring: imprecise scope descriptions, unusual quantities, change-order (Nachtrag) potential.
 4. Optional: unit price suggestions from historical data, what-if analyses.
 
-## Status: no stack yet
+## Stack and commands
 
-There is no code, no build system and no test command. The team has not chosen the language or the
-framework: do not assume one. The pull request that adds the first code must also update this file
-with the commands to set up, run, test and lint the project, and with the new folders.
+Python 3.12 or newer with [uv](https://docs.astral.sh/uv/). The package `boqcheck` in `src/` has no
+runtime dependencies. Dev tools: pytest, ruff (lint and format) and pydoclint (Sphinx docstrings).
+`pyproject.toml` holds their settings.
+
+| Task | Command |
+|---|---|
+| Set up `.venv/` | `uv sync` |
+| Test | `uv run pytest -q` |
+| Lint | `uv run ruff check`, `uv run ruff format --check`, `uv run pydoclint src tests` |
+| Format | `uv run ruff format` |
+
+Run the test and lint commands in the repository root before you open a pull request. pydoclint
+reads `pyproject.toml` from the current folder; in another folder it uses other defaults.
+
+Use the parser from Python:
+
+```python
+from pathlib import Path
+
+from boqcheck import parse
+
+path = Path("data/raw/GAEB-[PROJEKT_004].X83")
+boq = parse(path.name, path.read_bytes())  # sections and items in document order
+```
+
+`parse()` selects the parser by the file suffix, in any letter case. It reads `.x83` (GAEB DA XML).
+It raises `ValueError` for other suffixes, for data that is not well-formed XML and for XML without
+a GAEB `Award/BoQ` element. Other faults can raise other exceptions, for example a `Qty` that is
+not a number. All parsers return the model in `src/boqcheck/model.py` (`BoQ`, `Section`, `Item`).
+An OZ joins its levels with `.` and pads them with zeros to the widths of the BoQ breakdown, for
+example `01.02.0030`. Units stay as the file writes them (`m3`, `m³`, `Stk.`).
 
 ## Repository map
 
 | Path | Content |
 |---|---|
+| `src/boqcheck/` | the package: data model (`model.py`), GAEB DA XML parser (`gaeb_xml.py`), `parse()` in `__init__.py` |
+| `tests/` | pytest tests; they read the sample files in `data/raw/` |
+| `pyproject.toml`, `uv.lock`, `.python-version` | project, dev tools and their settings; locked versions |
 | `data/raw/` | the organizers' 44 sample files, unchanged; read-only |
 | `data/README.md` | inventory: formats, phases, counts, files that hold the same BoQ |
 | `README.md` | challenge, data overview, glossary |
@@ -58,6 +89,15 @@ the GAEB specification. All texts are German; PDFs use a decimal comma (`1.234,5
 - Sections are nested `BoQCtgy` elements. Items are `Item` elements (attribute `RNoPart`) with
   `Qty`, `QU` (unit) and `Description/CompleteText`: `OutlineText` holds the short text,
   `DetailTxt` the long text in `p`/`span` markup.
+- `DetailTxt` can hold several `Text` elements with `TextComplement` elements between them (text of
+  the client, blanks for the bidder). The parser keeps both in document order.
+- Section titles are in `BoQCtgy/LblTx`. The markup is `p`/`span`, or `span`/`br` without `p`
+  (`[NUMMER_001]_leer.X83`). `501-24-01_GAEB-XML_sas.x83` is indented inside the text markup.
+- `RNoPart` values are not always padded: `8209.003_Leistungsverzeichnis_leer.X83` and
+  `[NUMMER_001]_leer.X83` write `1` where `BoQBkdn` gives 2 or 4 digits. `StBALV23040.D86` writes
+  the OZs of the same BoQ with zeros (`01.01.0001`).
+- The parser skips `Remark` (notes) and `PerfDescr` elements, and item children such as `SubDescr`
+  (sub-descriptions), `RefDescr` and `RefRNo` in `[NUMMER_001]_leer.X83`.
 - Some items have `Provis` or `LumpSumItem` children. `501-24-01_GAEB-XML_sas.x83` also has STLB-Bau
   references (`STLBBauID`).
 - No file has `UP` or `IT` (unit price, total) elements: all four are unpriced.
