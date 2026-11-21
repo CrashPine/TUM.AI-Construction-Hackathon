@@ -97,6 +97,7 @@ def review_pdf(
             records.append(
                 {
                     "id": identifier,
+                    "rule": finding.kind,
                     "assessment": assessment,
                     "method": method,
                     "category": category,
@@ -109,6 +110,7 @@ def review_pdf(
                     "sources": [
                         {
                             "page": passage[0].page + 1,
+                            "oz": passage[0].oz,
                             "reference": _reference(passage),
                             "excerpt": _excerpt(passage),
                         }
@@ -199,6 +201,8 @@ def review_pdf(
         "annotated_pdf": str(output / pdf_name),
         "findings_log": str(output / log_name),
         "candidates": len(findings),
+        "page_count": len(pages),
+        "text_pages": len(pages) - len(skipped),
         "findings": records,
         "semantic_coverage": coverage,
         "warnings": warnings,

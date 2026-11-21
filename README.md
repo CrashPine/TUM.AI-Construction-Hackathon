@@ -29,7 +29,10 @@ findings and price-check coverage and exports the shared HTML report. GAEB 90, D
 are currently unsupported.
 
 Review state and generated files are available for the lifetime of the local server. Download
-the report, annotated PDF or log before stopping it.
+the report, annotated PDF or log before stopping it. To retain a confirmed PDF rule case,
+select its history checkbox and enter a reviewer identifier before saving. Confirmed cases
+promoted this way persist in `bidguard-history.sqlite3` (override with `--history-db PATH`).
+The next upload reports coverage for saved drawing-scope and aggregate-limit rules.
 
 ### Command-line review
 

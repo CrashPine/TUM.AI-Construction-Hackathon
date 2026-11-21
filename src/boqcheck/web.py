@@ -2,13 +2,16 @@
 
 import argparse
 import re
+import sqlite3
 from collections.abc import Callable
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import parse_qs
 from uuid import uuid4
 from wsgiref.simple_server import make_server
 
+from .history import RULES, SEVERITIES, initialize, promote, replay
 from .review_pdf import review_pdf
 from .web_gaeb import review_x83
 from .web_views import STATUSES, review_view, upload_view
@@ -34,14 +37,19 @@ def _read_body(env: dict, limit: int, *, media_type: str) -> bytes:
     return env["wsgi.input"].read(length)
 
 
-def _update(result: dict, fields: dict[str, list[str]]) -> None:
+def _update(
+    result: dict, fields: dict[str, list[str]], history_db: Path | None, source: str
+) -> None:
     """Validate a complete review form before updating the session.
 
     :param result: existing review result.
     :param fields: submitted form fields.
+    :param history_db: configured history database, if enabled.
+    :param source: original upload filename.
     :raises ValueError: if a status or question is invalid.
     """
     changes = []
+    cases = []
     for finding in result["findings"]:
         identifier = finding["id"]
         status = fields.get(f"status-{identifier}", [""])[0]
@@ -49,6 +57,17 @@ def _update(result: dict, fields: dict[str, list[str]]) -> None:
         if status not in STATUSES or len(question) > 2000:
             raise ValueError("Ungültige Prüfdaten.")
         changes.append((finding, status, question))
+        if f"promote-{identifier}" in fields:
+            if history_db is None or status != "confirmed" or finding.get("rule") not in RULES:
+                raise ValueError("Nur bestätigte Befunde mit wiederverwendbarer Regel speichern.")
+            cases.append((finding, question))
+    if cases:
+        reviewer = fields.get("reviewer", [""])[0].strip()
+        trade = fields.get("trade", [""])[0].strip()
+        severity = SEVERITIES.get(fields.get("severity", ["medium"])[0])
+        if not reviewer or len(reviewer) > 120 or len(trade) > 120 or severity is None:
+            raise ValueError("Bitte Prüfer und gültige Priorität für die Historie angeben.")
+        promote(history_db, source, result["document_hash"], reviewer, trade, severity, cases)
     for finding, status, question in changes:
         finding.update(review_status=status, question=question)
 
@@ -64,19 +83,25 @@ def _analyse(env: dict, name: str, output: Path) -> dict:
     """
     suffix = Path(name).suffix.lower()
     if suffix == ".pdf":
-        return review_pdf(name, _read_body(env, _MAX_UPLOAD, media_type="application/pdf"), output)
+        data = _read_body(env, _MAX_UPLOAD, media_type="application/pdf")
+        result = review_pdf(name, data, output)
+        result["document_hash"] = sha256(data).hexdigest()
+        return result
     if suffix == ".x83":
         return review_x83(name, _read_body(env, _MAX_UPLOAD, media_type="application/xml"))
     raise ValueError("Unterstützt werden PDF und GAEB X83.")
 
 
-def make_app(directory: Path) -> Callable:
+def make_app(directory: Path, *, history_db: Path | None = None) -> Callable:
     """Build the single-process WSGI application.
 
     :param directory: temporary root for generated artifacts.
+    :param history_db: SQLite database that persists beyond the server lifetime.
     :returns: WSGI application with per-run in-memory state.
     """
     runs: dict[str, tuple[str, dict]] = {}
+    if history_db is not None:
+        initialize(history_db)
 
     def app(env: dict, start_response: Callable) -> list[bytes]:
         """Dispatch one local HTTP request.
@@ -100,6 +125,15 @@ def make_app(directory: Path) -> Callable:
                 name = query.get("name", ["upload.pdf"])[0][:200]
                 identifier = uuid4().hex
                 result = _analyse(env, name, directory / identifier)
+                if history_db is not None:
+                    result["history"] = replay(history_db, result)
+                    matched = {
+                        identifier
+                        for pattern in result["history"]
+                        for identifier in pattern["matches"]
+                    }
+                    for finding in result["findings"]:
+                        finding["history_match"] = finding["id"] in matched
                 for finding in result["findings"]:
                     finding["review_status"] = "open"
                 runs[identifier] = (name, result)
@@ -114,7 +148,7 @@ def make_app(directory: Path) -> Callable:
                         env, 512 * 1024, media_type="application/x-www-form-urlencoded"
                     )
                     fields = parse_qs(data.decode("utf-8"), keep_blank_values=True)
-                    _update(result, fields)
+                    _update(result, fields, history_db, name)
                     status = "303 See Other"
                     headers.append(("Location", base))
                 elif method == "GET" and subpage in ("pdf", "log"):
@@ -144,7 +178,7 @@ def make_app(directory: Path) -> Callable:
                 status, body = "404 Not Found", "Seite nicht gefunden."
         except ValueError as error:
             status, content_type, body = "400 Bad Request", "text/plain; charset=utf-8", str(error)
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError, sqlite3.Error):
             status = "500 Internal Server Error"
             content_type, body = (
                 "text/plain; charset=utf-8",
@@ -163,9 +197,11 @@ def main() -> None:
     """Start the local review server on a loopback port."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--history-db", type=Path, default=Path("bidguard-history.sqlite3"))
     args = parser.parse_args()
     with TemporaryDirectory(prefix="bidguard-") as temporary:
-        with make_server("127.0.0.1", args.port, make_app(Path(temporary))) as server:
+        application = make_app(Path(temporary), history_db=args.history_db)
+        with make_server("127.0.0.1", args.port, application) as server:
             print(f"BidGuard AI · http://127.0.0.1:{server.server_port}", flush=True)
             try:
                 server.serve_forever()

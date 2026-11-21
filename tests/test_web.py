@@ -1,14 +1,17 @@
 """Verify PDF and GAEB uploads through the local web workflow without a model."""
 
 from collections.abc import Callable
+from contextlib import closing
 from io import BytesIO
 from pathlib import Path
+from sqlite3 import connect
 from urllib.parse import urlencode
 from wsgiref.util import setup_testing_defaults
 
 import pymupdf
 import pytest
 
+from boqcheck.history import initialize, promote, replay
 from boqcheck.web import make_app
 
 _ROOF = Path(__file__).resolve().parents[1] / "data" / "raw" / "LV_09_Porenbetondach.pdf"
@@ -141,3 +144,60 @@ def test_x83_finding_links_to_both_positions(tmp_path: Path) -> None:
     assert "Kategorie: LV-Struktur" in page and "Auswirkung:" in page
     assert 'href="#position-1"' in page and 'href="#position-2"' in page
     assert "Doppelte OZ" in _request(app, run + "/report")[2].decode()
+
+
+def test_only_confirmed_cases_are_promoted_and_replayed_after_restart(tmp_path: Path) -> None:
+    """Persist source-backed history and keep retries idempotent across runs.
+
+    :param tmp_path: isolated database and artifact directory.
+    """
+    history = tmp_path / "history.sqlite3"
+    app = make_app(tmp_path, history_db=history)
+    upload = f"/upload?name={_ROOF.name}"
+    body = _ROOF.read_bytes()
+    run = _request(app, upload, body, "application/pdf")[1]["Location"]
+    assert "Keine historischen Regeln gespeichert" in _request(app, run)[2].decode()
+    form = {
+        "status-BG-001": "open",
+        "question-BG-001": "Dach oder Fassade?",
+        "promote-BG-001": "on",
+        "reviewer": "QA",
+        "trade": "Dach",
+        "severity": "high",
+    }
+    form_type = "application/x-www-form-urlencoded"
+    assert _request(app, run, urlencode(form).encode(), form_type)[0].startswith("400")
+    with closing(connect(history)) as db:
+        assert db.execute("SELECT COUNT(*) FROM confirmed_cases").fetchone() == (0,)
+    form["status-BG-001"] = "confirmed"
+    for _ in range(2):
+        assert _request(app, run, urlencode(form).encode(), form_type)[0].startswith("303")
+
+    restarted = make_app(tmp_path, history_db=history)
+    second = _request(restarted, upload, body, "application/pdf")[1]["Location"]
+    page = _request(restarted, second)[2].decode()
+    assert "Historischer Regel-Treffer" in page and "Zeichnungsumfang · Geprüft" in page
+    assert _request(restarted, second, urlencode(form).encode(), form_type)[0].startswith("303")
+    with closing(connect(history)) as db:
+        assert db.execute("SELECT COUNT(*) FROM patterns").fetchone() == (1,)
+        (case,) = db.execute("SELECT reviewer, trade, severity, evidence FROM confirmed_cases")
+        assert case[:3] == ("QA", "Dach", 3)
+        assert "9.2.3" in case[3] and "9.2.4" in case[3]
+
+
+def test_history_priority_and_coverage(tmp_path: Path) -> None:
+    """Prioritize severity first and report non-PDF or unreadable coverage.
+
+    :param tmp_path: isolated database directory.
+    """
+    db = tmp_path / "history.sqlite3"
+    initialize(db)
+    for rule, priority in (("scope_reference", 1), ("aggregate_limit", 3)):
+        finding = {"rule": rule, "sources": [{"reference": "PDF-Seite 1"}]}
+        promote(db, "synthetic.pdf", rule, "QA", "Test", priority, [(finding, "")])
+    coverage = replay(db, {"findings": [], "text_pages": 0, "page_count": 1})
+    assert [entry["rule"] for entry in coverage] == ["aggregate_limit", "scope_reference"]
+    assert {entry["status"] for entry in coverage} == {"inconclusive"}
+    assert {entry["status"] for entry in replay(db, {"findings": [], "gaeb": {}})} == {
+        "inapplicable"
+    }

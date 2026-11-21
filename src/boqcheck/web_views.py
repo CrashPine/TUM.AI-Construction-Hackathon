@@ -2,9 +2,27 @@
 
 from html import escape
 
+from .history import RULES
 from .model import Item
 
 STATUSES = {"open": "Offen", "confirmed": "Bestätigt", "dismissed": "Verworfen"}
+_HISTORY_STATUS = {
+    "checked": "Geprüft",
+    "inapplicable": "Nicht anwendbar",
+    "inconclusive": "Offen",
+}
+_RULE_NAMES = {
+    "scope_reference": "Zeichnungsumfang",
+    "aggregate_limit": "Körnungsgrenze",
+}
+_HISTORY_FIELDS = """
+<fieldset><legend>Für das Speichern in der Historie</legend>
+<label for="reviewer">Prüferkürzel</label><input id="reviewer" name="reviewer" maxlength="120">
+<label for="trade">Gewerk (optional)</label><input id="trade" name="trade" maxlength="120">
+<label for="severity">Priorität</label><select id="severity" name="severity">
+<option value="low">Niedrig</option><option value="medium" selected>Mittel</option>
+<option value="high">Hoch</option></select></fieldset>
+"""
 
 _STYLE = """
 :root{font:16px/1.55 system-ui,sans-serif;color:#202620;background:#f4f6f3}
@@ -83,12 +101,13 @@ def upload_view() -> str:
     return _page("LV prüfen", _UPLOAD)
 
 
-def _finding(base: str, finding: dict, report: bool) -> str:
+def _finding(base: str, finding: dict, report: bool, history: bool) -> str:
     """Render one finding and its evidence links.
 
     :param base: internally generated run URL.
     :param finding: finding with reviewer status and question.
     :param report: whether the rendering is for export.
+    :param history: whether history controls and labels are available.
     :returns: rendered finding.
     """
     identifier = finding["id"]
@@ -101,6 +120,9 @@ def _finding(base: str, finding: dict, report: bool) -> str:
         f"<p>{escape(finding['explanation'])}</p>",
         f"<p><strong>Mögliche Auswirkung:</strong> {escape(finding['impact'])}</p>",
     ]
+    if history:
+        origin = "Historischer Regel-Treffer" if finding["history_match"] else "Aktuelle Prüfung"
+        pieces.append(f'<p class="badge">{origin}</p>')
     for source in finding["sources"]:
         ref = escape(source["reference"])
         if not report and "position" in source:
@@ -125,6 +147,11 @@ def _finding(base: str, finding: dict, report: bool) -> str:
                 f'maxlength="2000">{escape(finding["question"])}</textarea>',
             ]
         )
+        if history and finding.get("rule") in RULES:
+            pieces.append(
+                f'<label><input type="checkbox" name="promote-{identifier}"> '
+                "Bestätigten Befund in die Historie aufnehmen</label>"
+            )
     pieces.append("</article>")
     return "".join(pieces)
 
@@ -207,12 +234,26 @@ def review_view(
         content.append(
             "<ul>" + "".join(f"<li>{escape(w)}</li>" for w in result["warnings"]) + "</ul>"
         )
+    history = "history" in result
+    if history:
+        content.append("<h2>Historische Regeln</h2>")
+        if result["history"]:
+            entries = []
+            for pattern in result["history"]:
+                label = escape(_RULE_NAMES.get(pattern["rule"], pattern["rule"]))
+                status = _HISTORY_STATUS[pattern["status"]]
+                entries.append(f"<li>{label} · {status} · {pattern['cases']} bestätigte Fälle</li>")
+            content.append("<ul>" + "".join(entries) + "</ul>")
+        else:
+            content.append("<p>Keine historischen Regeln gespeichert.</p>")
     if not findings:
         content.append("<p>Keine aktiven Befunde.</p>")
     if findings and not report:
         content.append(f'<form method="post" action="{base}">')
-    content.extend(_finding(base, finding, report) for finding in findings)
+    content.extend(_finding(base, finding, report, history) for finding in findings)
     if findings and not report:
+        if history and any(f.get("rule") in RULES for f in findings):
+            content.append(_HISTORY_FIELDS)
         content.append('<div class="actions"><button>Änderungen speichern</button></div></form>')
     if report:
         questions = [
