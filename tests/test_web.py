@@ -5,6 +5,7 @@ import re
 from collections.abc import Callable
 from contextlib import closing
 from hashlib import sha256
+from html import escape
 from io import BytesIO
 from pathlib import Path
 from sqlite3 import connect
@@ -1030,3 +1031,112 @@ def test_historical_comparison_export(tmp_path: Path) -> None:
     )
     report = _request(app, headers["Location"] + "/report")[2].decode()
     assert "Synthetische Beispieldaten" not in report
+
+
+def _article(page: str, identifier: str) -> str:
+    """Return the rendered block of one finding.
+
+    :param page: review page or report HTML.
+    :param identifier: finding identifier.
+    :returns: the finding's ``article`` element.
+    """
+    match = re.search(f'<article id="{identifier}">.*?</article>', page, re.DOTALL)
+    assert match, identifier
+    return match.group()
+
+
+def _mismatched_xlsx() -> bytes:
+    """Build a synthetic one-position workbook whose total differs from Menge × EP.
+
+    :returns: workbook bytes.
+    """
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Dach"
+    sheet.append(["OZ", "Kurztext", "Menge", "ME", "EP", "Preisbasis", "Gesamtbetrag"])
+    sheet.append(["01.01.0010", "Dachplatte", 10, "m", 2, 1, 19.99])
+    data = BytesIO()
+    workbook.save(data)
+    return data.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("name", "media", "findings", "anchors"),
+    [
+        (_ROOF.name, "application/pdf", ("BG-001",), ("/pdf#page=1",)),
+        ("GAEB-[PROJEKT_004].X83", "application/xml", (), ('<tr id="position-',)),
+        (
+            "StBALV23040.D86",
+            "application/octet-stream",
+            ("BG-001", "BG-002"),
+            ('href="#record-4060"', 'href="#record-4158"'),
+        ),
+        ("synthetic.xlsx", "application/octet-stream", ("BG-001",), ('href="#position-1"',)),
+    ],
+)
+def test_acceptance_walkthrough(
+    tmp_path: Path, name: str, media: str, findings: tuple[str, ...], anchors: tuple[str, ...]
+) -> None:
+    """Review each input format end to end and keep the reviewer's edits in the report.
+
+    :param tmp_path: isolated web storage.
+    :param name: uploaded file name; the XLSX is synthetic.
+    :param media: upload media type the endpoint expects.
+    :param findings: frozen finding identifiers.
+    :param anchors: format-specific source navigation markup.
+    """
+    app = make_app(tmp_path)
+    data = _mismatched_xlsx() if name.endswith(".xlsx") else _ROOF.with_name(name).read_bytes()
+    status, headers, _ = _request(app, "/upload?" + urlencode({"name": name}), data, media)
+    assert status.startswith("303")
+    run = headers["Location"]
+    page = _request(app, run)[2].decode()
+    assert set(re.findall(r'name="status-(BG-\d+)"', page)) == set(findings)
+    assert all(anchor in page for anchor in anchors)
+    if not findings:
+        assert "Keine aktiven Befunde." in page and "<article" not in page
+    edits = {f"status-{f}": "confirmed" for f in findings}
+    edits |= {f"question-{f}": f"Frage {f} zu {name}?" for f in findings}
+    if findings:
+        form = urlencode(edits).encode()
+        assert _request(app, run, form, "application/x-www-form-urlencoded")[0].startswith("303")
+    pdf = name.endswith(".pdf")
+    if pdf:
+        docx = _ROOF.with_name("LV-Positionen.docx").read_bytes()
+        target = run + "/attachment?name=LV-Positionen.docx"
+        assert _request(app, target, docx, "application/octet-stream")[0].startswith("303")
+    page = _request(app, run)[2].decode()
+    report = _request(app, run + "/report?download=1")[2].decode()
+    for finding in findings:
+        block = _article(page, finding)
+        assert '<option value="confirmed" selected>' in block
+        assert f"Frage {finding} zu {escape(name)}?" in block
+        assert "Bestätigt" in _article(report, finding)
+        question = f'<span class="question">Frage {finding} zu {escape(name)}?</span>'
+        assert f"<li><strong>{finding}</strong> {question}</li>" in report
+    assert _request(app, run + "/pdf")[0].startswith("200" if pdf else "404")
+    if pdf:
+        assert "LV-Positionen.docx" in page and "53 Textstellen" in page
+        assert "P2 · Absatz 2" in page and _request(app, run + "/log")[0].startswith("200")
+        pages = int(re.search(r"Textebene: \d+ von (\d+) Seiten", page).group(1))
+        assert all(1 <= int(n) <= pages for n in re.findall(r"/pdf#page=(\d+)", page))
+    elif name.endswith(".xlsx"):
+        assert "Blatt Dach · Zeile 2" in report and "19.99" in report
+
+
+def test_long_pdf_reports_text_layer_and_price_coverage(tmp_path: Path) -> None:
+    """Show the extraction coverage of the 91-page priced BoQ on screen and in the report.
+
+    :param tmp_path: isolated web storage.
+    """
+    app = make_app(tmp_path)
+    data = _ROOF.with_name("Abgabe LV.pdf").read_bytes()
+    status, headers, _ = _request(
+        app, "/upload?" + urlencode({"name": "Abgabe LV.pdf"}), data, "application/pdf"
+    )
+    assert status.startswith("303")
+    run = headers["Location"]
+    for rendered in (_request(app, run)[2], _request(app, run + "/report?download=1")[2]):
+        text = rendered.decode()
+        assert "Textebene: 91 von 91 Seiten" in text
+        assert "EP/GP-Tabellen: 248/248 erkannte Positionszeilen geprüft." in text

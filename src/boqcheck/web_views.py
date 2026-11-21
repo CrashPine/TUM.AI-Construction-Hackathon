@@ -435,6 +435,10 @@ def review_view(
             else:
                 content.append("<p>Keine prüfbaren Preisangaben.</p>")
     else:
+        content.append(
+            f'<p class="badge">Textebene: {result["text_pages"]} von '
+            f"{result['page_count']} Seiten</p>"
+        )
         if model := result.get("semantic_model"):
             content.append(f'<p class="badge">Lokales Modell: {escape(model)}</p>')
         content.append(f'<p class="badge">Modellprüfung: {escape(result["semantic_coverage"])}</p>')
