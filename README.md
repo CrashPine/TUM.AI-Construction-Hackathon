@@ -32,7 +32,9 @@ The same upload form accepts GAEB X83 (3.1 or 3.2). It shows normalized position
 findings and price-check coverage and exports the shared HTML report. GAEB 90 uploads
 (D83, D84 and D86) use the same review and export. Price findings cite physical lines in
 the uploaded file. A price-only D84 displays the supplied prices and reports missing
-quantities. DOCX and XLSX imports remain open.
+quantities. An optional DOCX attachment belongs to the uploaded LV. Open its source list,
+select a paragraph or table cell for a finding, and save the review to include that excerpt
+in the HTML report. Selection is manual. XLSX import remains open.
 
 To make local Ollama available for PDF uploads, start the server with:
 
