@@ -908,17 +908,38 @@ def test_historical_comparison_export(tmp_path: Path) -> None:
             for i in range(3)
         ],
     )
+    dataset.pop("peers")
+    projects = []
+    for i in range(3):
+        peer = Workbook()
+        peer.active.title = f"Sheet {i}"
+        peer.active.append(["OZ", "Kurztext", "Menge", "ME", "EP", "Preisbasis"])
+        peer.active.append(["01", "Dach", 100, "m2", 1000, 100])
+        name = f"history-{i}.xlsx"
+        peer.save(tmp_path / name)
+        defaults = {
+            key: value
+            for key, value in metadata.items()
+            if key not in {"project", "source", "unit", "price_basis"}
+        }
+        projects.append(
+            dict(workbook=name, project=f"demo-{i}", defaults=defaults, positions={"01": {}})
+        )
+    dataset["projects"] = projects
     path.write_text(json.dumps(dataset), "utf8")
     for insufficient in (False, True):
         if insufficient:
-            dataset["peers"].pop()
+            dataset["projects"].pop()
             path.write_text(json.dumps(dataset), "utf8")
         app = make_app(tmp_path, dataset=load_dataset(path))
         _, headers, _ = _request(
             app, "/upload?name=demo.xlsx", workbook, "application/octet-stream"
         )
         report = _request(app, headers["Location"] + "/report?download=1")[2].decode()
-        assert "Synthetische Beispieldaten" in report and "Sheet 1" in report
+        assert (
+            "Synthetische Beispieldaten" in report
+            and "history-1.xlsx · Blatt Sheet 1 · Zeile 2" in report
+        )
         if insufficient:
             assert report.count("Zu wenige Vergleichsprojekte") == 2
         else:

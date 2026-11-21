@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .historical_comparison import HistoricalPosition, compare_history
 from .history_embeddings import similar_rows
+from .history_ingest import workbook_peers
 from .model import Item
 
 _NUMBERS = {"quantity", "scale", "price", "price_basis"}
@@ -26,6 +27,8 @@ class HistoryDataset:
     embedding_model: str = ""
     embedding_port: int = 11434
     similarity: float = 0.75
+    project_profiles: dict[str, str] | None = None
+    current_profile: str = ""
 
 
 def _position(row: dict) -> HistoricalPosition:
@@ -57,7 +60,8 @@ def load_dataset(path: Path) -> HistoryDataset:
         model = data.get("embedding_model", "")
         port = data.get("embedding_port", 11434)
         threshold = float(data.get("similarity", 0.75))
-        descriptions = tuple(row.get("description", "") for row in data["peers"])
+        peers = [*data.get("peers", []), *workbook_peers(path.parent, data.get("projects", []))]
+        descriptions = tuple(row.get("description", "") for row in peers)
         if (
             not isinstance(model, str)
             or type(port) is not int
@@ -66,16 +70,28 @@ def load_dataset(path: Path) -> HistoryDataset:
             or not all(isinstance(d, str) for d in descriptions)
         ):
             raise ValueError("Invalid embedding settings.")
+        current_profile = data.get("current_profile", "")
+        profiles = data.get("project_profiles", {})
+        if (
+            not isinstance(current_profile, str)
+            or not isinstance(profiles, dict)
+            or not all(isinstance(value, str) and value.strip() for value in profiles.values())
+            or bool(current_profile.strip()) != bool(profiles)
+            or (profiles and not model)
+        ):
+            raise ValueError("Invalid project similarity settings.")
         return HistoryDataset(
             data["filename"],
             data["sha256"],
             data["synthetic"],
             {oz: _position(row) for oz, row in data["current"].items()},
-            [_position(row) for row in data["peers"]],
+            [_position(row) for row in peers],
             descriptions,
             model,
             port,
             threshold,
+            profiles,
+            current_profile,
         )
     except (OSError, ValueError, KeyError, TypeError, AttributeError, InvalidOperation) as error:
         raise ValueError(f"Invalid historical dataset: {path.name}") from error
@@ -90,6 +106,30 @@ def report_history(dataset: HistoryDataset, items: tuple[Item, ...]) -> list[dic
     """
     counts = Counter(item.oz for item in items)
     reports = []
+    profiles = dataset.project_profiles
+    selected_projects = None
+    project_coverage = ""
+    if profiles:
+        current_projects = {metadata.project for metadata in dataset.current.values()}
+        keys = sorted({peer.project for peer in dataset.peers} & profiles.keys() - current_projects)
+        selected_projects = set()
+        try:
+            for start in range(0, len(keys), 32):
+                batch = keys[start : start + 32]
+                selected = similar_rows(
+                    dataset.current_profile,
+                    [profiles[key] for key in batch],
+                    dataset.embedding_model,
+                    dataset.embedding_port,
+                    dataset.similarity,
+                )
+                selected_projects.update(batch[i] for i in selected)
+            project_coverage = (
+                f"Projektvorauswahl: {len(selected_projects)}/{len(keys)} ausgewählt."
+            )
+        except (OSError, ValueError, TypeError, KeyError, OverflowError):
+            selected_projects.clear()
+            project_coverage = "Projektvorauswahl nicht verfügbar."
     for index, item in enumerate(items, 1):
         metadata = dataset.current.get(item.oz)
         if not metadata or counts[item.oz] != 1 or item.unit != metadata.unit:
@@ -105,6 +145,7 @@ def report_history(dataset: HistoryDataset, items: tuple[Item, ...]) -> list[dic
                 (peer, text)
                 for peer, text in zip(peers, dataset.descriptions, strict=True)
                 if text.strip()
+                and (selected_projects is None or peer.project in selected_projects)
                 and peer.project != current.project
                 and (peer.trade, peer.scope, peer.unit)
                 == (current.trade, current.scope, current.unit)
@@ -134,7 +175,7 @@ def report_history(dataset: HistoryDataset, items: tuple[Item, ...]) -> list[dic
                 "oz": item.oz,
                 "position": index,
                 "results": compare_history(current, peers),
-                "retrieval": retrieval,
+                "retrieval": " ".join(filter(None, (project_coverage, retrieval))),
             }
         )
     return reports
