@@ -10,6 +10,22 @@ finds errors and risks in them and gives the estimator a risk report before the 
 BoQ data model. Checks, the risk report and the upload page do not exist yet.
 [AGENTS.md](AGENTS.md) has the commands and the rules for coding agents.
 
+## Local PDF contradiction review
+
+```powershell
+uv sync --locked
+uv run python -m boqcheck.review_pdf "data/raw/LV_09_Porenbetondach.pdf" "runs/roof-review"
+```
+
+Use a new output directory for each run. The command prints a JSON manifest with the status,
+candidate count, coverage warnings and paths to the annotated source PDF and Markdown log.
+Agent integrations can call `boqcheck.review_pdf.review_pdf(filename, pdf_bytes, output)` directly.
+
+The baseline checks forward references in drawing positions and differing maximum aggregate
+sizes for Schachtvierungen. Review the resulting candidates before using the proposed
+Bieterfragen. Textless pages are reported as skipped. See the
+[PDF review architecture](docs/pdf-contradiction-review.md) for the data flow and remaining work.
+
 ## Challenge
 
 **Problem.** Bills of quantities often contain thousands of line items, multiple cost groups and
