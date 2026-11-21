@@ -31,6 +31,8 @@ class HistoryDataset:
     project_profiles: dict[str, str] | None = None
     current_profile: str = ""
     authorization: str = ""
+    min_projects: int = 3
+    deviation_threshold: Decimal = Decimal("0.30")
 
 
 def _position(row: dict) -> HistoricalPosition:
@@ -57,7 +59,8 @@ def load_dataset(path: Path) -> HistoryDataset:
     :param path: explicitly configured local JSON file.
     :returns: comparison inputs and dataset provenance.
     :raises ValueError: if the dataset cannot be decoded, a real dataset declares no
-        authorization, or one project source holds conflicting observations.
+        authorization, one project source holds conflicting observations, or the anomaly
+        rule needs fewer than two projects or a non-positive deviation.
     """
     try:
         data = json.loads(path.read_text("utf8"), parse_float=Decimal)
@@ -98,6 +101,16 @@ def load_dataset(path: Path) -> HistoryDataset:
             or (profiles and not model)
         ):
             raise ValueError("Invalid project similarity settings.")
+        min_projects = data.get("min_projects", 3)
+        deviation = data.get("deviation_threshold", Decimal("0.30"))
+        # bool is excluded by the exact type checks; NaN and Infinity arrive as floats.
+        if (
+            type(min_projects) is not int
+            or min_projects < 2
+            or type(deviation) not in {int, Decimal}
+            or not Decimal(deviation) > 0
+        ):
+            raise ValueError("Invalid anomaly settings.")
         return HistoryDataset(
             data["filename"],
             data["sha256"],
@@ -111,6 +124,8 @@ def load_dataset(path: Path) -> HistoryDataset:
             profiles,
             current_profile,
             authorization.strip(),
+            min_projects,
+            Decimal(deviation),
         )
     except (OSError, ValueError, KeyError, TypeError, AttributeError, InvalidOperation) as error:
         raise ValueError(f"Invalid historical dataset: {path.name}") from error
@@ -230,7 +245,12 @@ def report_history(dataset: HistoryDataset, items: tuple[Item, ...]) -> list[dic
             {
                 "oz": item.oz,
                 "position": index,
-                "results": compare_history(current, peers),
+                "results": compare_history(
+                    current,
+                    peers,
+                    min_projects=dataset.min_projects,
+                    threshold=dataset.deviation_threshold,
+                ),
                 "retrieval": " ".join(filter(None, (project_coverage, retrieval))),
             }
         )

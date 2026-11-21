@@ -95,6 +95,9 @@ verification.
 - [x] Validate historical records: net/gross price type, declared usage authorization for
   non-synthetic data, one record per project and source, missing-field and exclusion counts in
   the report. Verified on synthetic data.
+- [x] Configure the anomaly rule per dataset (`min_projects`, `deviation_threshold`) and show
+  the rule, peer count, deviation from the median and peer sources in the report. Verified with
+  a labelled synthetic anomaly, a normal control, another scale basis and a missing scale.
 - [ ] Evaluate independent projects with reviewer-labelled comparable positions. Same-LV
   editions validate retrieval only and do not count as independent quantity or price peers.
 - [x] Freeze an offline acceptance baseline: exact rule findings for all 43 supported samples,

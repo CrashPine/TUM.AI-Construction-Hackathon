@@ -356,10 +356,17 @@ def _history_comparison(result: dict, report: bool) -> str:
                 continue
             basis = escape(" / ".join(comparison["basis"]))
             parts.append(f"<p>Ist: {comparison['value']:.4g} · Vergleichsbasis: {basis}</p>")
+            percent = format((comparison["threshold"] * 100).normalize(), "f")
+            parts.append(
+                f"<p>Vergleichsprojekte: {len(comparison['peers'])} "
+                f"(mindestens {comparison['min_projects']}) · Regel: auffällig außerhalb der "
+                f"Spanne und ab {percent} % Abweichung vom Median</p>"
+            )
             if "median" in comparison:
                 parts.append(
                     f"<p>Median: {comparison['median']:.4g} · "
-                    f"Spanne: {comparison['low']:.4g}–{comparison['high']:.4g}</p>"
+                    f"Spanne: {comparison['low']:.4g}–{comparison['high']:.4g} · "
+                    f"Abweichung vom Median: {comparison['deviation']:+.1%}</p>"
                 )
             for peer in comparison["peers"]:
                 sources = ", ".join(

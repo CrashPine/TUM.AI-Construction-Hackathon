@@ -236,8 +236,14 @@ Each observation requires `project`, `source`, `trade`, `scope`, and `unit`.
 Pass `scale` and `scale_unit` for quantity comparisons, and `currency`,
 `price_type`, `market`, and `price_period` for price comparisons. Peer rows
 also supply `quantity`, `price` and `price_basis` as applicable. The current
-quantity, price and price basis come from the XLSX. The web report requires
-three distinct comparable projects for a reference range. `price_type` must be
+quantity, price and price basis come from the XLSX. Quantities are compared
+per `scale` and `scale_unit`, prices per `price_basis`. A reference range needs
+at least `min_projects` distinct comparable projects (integer of at least 2,
+default 3); with fewer the report shows insufficient evidence. A value is
+flagged as unusual when it lies outside the peer range and deviates from the
+median by at least `deviation_threshold` (positive number, default 0.30). The
+report states both settings, the deviation and the peer sources. Embedding
+similarity only selects peers; it never decides an anomaly. `price_type` must be
 `net` or `gross`. A dataset with `synthetic` false needs a nonempty top-level
 `authorization` naming its usage basis; the report shows it as declared, not
 verified. Identical rows for the same project and source load once; differing

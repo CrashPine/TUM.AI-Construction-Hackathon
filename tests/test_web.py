@@ -990,11 +990,12 @@ def test_historical_comparison_export(tmp_path: Path) -> None:
         projects.append(
             dict(workbook=name, project=f"demo-{i}", defaults=defaults, positions={"01": {}})
         )
-    dataset["projects"] = projects
+    dataset.update(projects=projects, min_projects=2, deviation_threshold=0.5)
     path.write_text(json.dumps(dataset), "utf8")
     for insufficient in (False, True):
         if insufficient:
             dataset["projects"].pop()
+            del dataset["min_projects"]
             dataset["peers"] = [dict(metadata, quantity=100, price=1000)]
             dataset["current"]["01"]["currency"] = ""
             dataset.update(synthetic=False, authorization="Lizenz <7>")
@@ -1008,11 +1009,21 @@ def test_historical_comparison_export(tmp_path: Path) -> None:
         assert ("Synthetische Beispieldaten" in report) is not insufficient
         if insufficient:
             assert report.count("Zu wenige Vergleichsprojekte") == 1
+            assert "Vergleichsprojekte: 2 (mindestens 3)" in report
             assert "Fehlende Angaben: Währung" in report
             assert "Ausgeschlossen (Vergleichsstufe): 1 gleiches Projekt" in report
             assert "Nutzungsfreigabe laut Datensatz, nicht geprüft: Lizenz &lt;7&gt;" in report
         else:
             assert report.count("Auffällig") == 2 and "Median:" in report
+            assert (
+                report.count(
+                    "Vergleichsprojekte: 3 (mindestens 2) · Regel: auffällig außerhalb der "
+                    "Spanne und ab 50 % Abweichung vom Median"
+                )
+                == 2
+            )
+            assert "Abweichung vom Median: +100.0%" in report
+            assert "Abweichung vom Median: +200.0%" in report
     _, headers, _ = _request(
         app, "/upload?name=demo.xlsx", workbook + b"changed", "application/octet-stream"
     )
