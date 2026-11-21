@@ -98,6 +98,10 @@ verification.
 - [x] Configure the anomaly rule per dataset (`min_projects`, `deviation_threshold`) and show
   the rule, peer count, deviation from the median and peer sources in the report. Verified with
   a labelled synthetic anomaly, a normal control, another scale basis and a missing scale.
+- [x] Compare prices only on the same trade, scope, unit, currency, net/gross type, market and
+  price period, normalized per price basis, without index or date adjustment. Verified on
+  synthetic data: each basis field and the normalization are needed (8 of 8 field-drop mutants
+  fail the test; the earlier tests missed 3).
 - [ ] Evaluate independent projects with reviewer-labelled comparable positions. Same-LV
   editions validate retrieval only and do not count as independent quantity or price peers.
 - [x] Freeze an offline acceptance baseline: exact rule findings for all 43 supported samples,
