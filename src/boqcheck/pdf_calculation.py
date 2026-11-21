@@ -5,42 +5,10 @@ from collections import defaultdict
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 
 from .contradictions import Finding
+from .numeric_roles import _NUMBER, _PRICE, _QTY, _TOTAL, _unit
 from .pdf_extract import Line
 
-_NUMBER = r"(?:[0-9]{1,3}(?:\.[0-9]{3})+|[0-9]+)(?:,[0-9]+)?"
-_UNITS = {
-    "mm": ("length", -3),
-    "cm": ("length", -2),
-    "m": ("length", 0),
-    "mm2": ("area", -6),
-    "cm2": ("area", -4),
-    "m2": ("area", 0),
-    "mm3": ("volume", -9),
-    "cm3": ("volume", -6),
-    "m3": ("volume", 0),
-    "g": ("mass", -3),
-    "kg": ("mass", 0),
-    "t": ("mass", 3),
-    "st": ("count", 0),
-    "stk": ("count", 0),
-}
-_UNIT = r"(?:mm|cm|m)(?:[²³23])?|kg|g|t|Stk?\.?"
-_QTY = re.compile(rf"Menge\s*:\s*(?P<qty>{_NUMBER})\s*(?P<unit>(?:{_UNIT}))", re.I)
-_PRICE = re.compile(
-    rf"(?:EP|Einheitspreis)\s*:\s*(?P<price>{_NUMBER})\s*(?:EUR|€)\s*"
-    rf"(?:/|je|pro)\s*(?P<basis>{_NUMBER})\s*(?P<unit>(?:{_UNIT}))",
-    re.I,
-)
-_TOTAL = re.compile(rf"(?:GB|Gesamtbetrag)\s*:\s*(?P<total>{_NUMBER})\s*(?:EUR|€)", re.I)
-
-
-def _unit(raw: str) -> tuple[str, int]:
-    """Read the dimension and base-ten scale of a recognized unit.
-
-    :param raw: source spelling captured by the unit grammar.
-    :returns: dimension name and exponent relative to the base unit.
-    """
-    return _UNITS[raw.casefold().rstrip(".").replace("²", "2").replace("³", "3")]
+__all__ = ["_NUMBER", "evaluate_price", "price_groups"]
 
 
 def price_groups(sources: dict[str, Line]) -> dict:
@@ -85,6 +53,54 @@ def price_groups(sources: dict[str, Line]) -> dict:
     return targets
 
 
+def _polynomial(expr: object, leaves: dict[str, int], depth: int = 0) -> dict | None:
+    """Expand an allowlisted tree into exponents of quantity, price and basis.
+
+    The tree is accepted only if it is algebraically equal to quantity times price per
+    basis, so a dimensionally valid but different formula such as price times basis per
+    quantity is rejected.
+
+    :param expr: binary ``add``/``sub``/``mul``/``div`` nodes over input token IDs.
+    :param leaves: input token IDs of this target mapped to their operand index.
+    :param depth: nesting depth of ``expr``.
+    :returns: exponent tuples mapped to non-zero coefficients, or ``None`` if invalid.
+    """
+    if isinstance(expr, str):
+        return {tuple(int(i == leaves[expr]) for i in range(3)): 1} if expr in leaves else None
+    if (
+        depth > 6
+        or not isinstance(expr, dict)
+        or expr.keys() != {"op", "args"}
+        or expr["op"] not in ("add", "sub", "mul", "div")
+        or not isinstance(expr["args"], list)
+        or len(expr["args"]) != 2
+    ):
+        return None
+    left, right = (_polynomial(arg, leaves, depth + 1) for arg in expr["args"])
+    if left is None or right is None:
+        return None
+    result: dict = {}
+    if expr["op"] in ("add", "sub"):
+        # Quantity and basis share a dimension; price is euro per that dimension.
+        if len({(c, a - c + b) for a, c, b in left | right}) != 1:
+            return None
+        sign = 1 if expr["op"] == "add" else -1
+        for term, coefficient in [*left.items(), *((t, sign * c) for t, c in right.items())]:
+            result[term] = result.get(term, 0) + coefficient
+    elif expr["op"] == "mul":
+        for x, cx in left.items():
+            for y, cy in right.items():
+                term = tuple(a + b for a, b in zip(x, y, strict=True))
+                result[term] = result.get(term, 0) + cx * cy
+    elif len(right) == 1 and (divisor := next(iter(right.items())))[1] == 1:
+        result = {
+            tuple(a - b for a, b in zip(x, divisor[0], strict=True)): c for x, c in left.items()
+        }
+    else:
+        return None
+    return {term: c for term, c in result.items() if c}
+
+
 def evaluate_price(group: tuple, expr: object) -> tuple[bool, Finding | None]:
     """Evaluate an explicit line-price expression using only its source operands.
 
@@ -93,9 +109,9 @@ def evaluate_price(group: tuple, expr: object) -> tuple[bool, Finding | None]:
     :returns: whether checked and a finding only for a verified discrepancy.
     """
     tokens, parts = group
-    product = {"op": "mul", "args": [tokens["qty"], tokens["price"]]}
-    inverse = {"op": "mul", "args": [tokens["price"], tokens["qty"]]}
-    if expr not in ({"op": "div", "args": [p, tokens["basis"]]} for p in (product, inverse)):
+    if _polynomial(expr, {tokens[r]: i for i, r in enumerate(("qty", "price", "basis"))}) != {
+        (1, 1, -1): 1
+    }:
         return False, None
     qty, price, basis, actual = (
         Decimal(parts[key][3].replace(".", "").replace(",", "."))
