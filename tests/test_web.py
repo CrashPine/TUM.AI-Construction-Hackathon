@@ -452,6 +452,50 @@ def test_pdf_attachment_comparison(
         assert "Keine aktiven Befunde" in report
 
 
+@pytest.mark.parametrize(
+    ("hidden", "unread"),
+    [
+        (
+            "<w:sdt><w:sdtContent><w:p><w:r><w:t>Dicke: 30 mm</w:t></w:r></w:p>"
+            "</w:sdtContent></w:sdt>",
+            1,
+        ),
+        (
+            "<w:tbl><w:tr><w:tc><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Dicke: 30 mm</w:t></w:r></w:p>"
+            "</w:tc></w:tr></w:tbl></w:tc></w:tr></w:tbl>",
+            1,
+        ),
+        ('<w:altChunk r:id="x"/>', 1),
+        ("<w:p><w:r><w:t>Ende</w:t></w:r></w:p>", 0),
+    ],
+)
+def test_partial_docx_is_not_assessed(tmp_path: Path, hidden: str, unread: int) -> None:
+    """Report DOCX body content the reader skipped instead of a clean comparison.
+
+    :param tmp_path: isolated review storage.
+    :param hidden: body block next to a readable paragraph.
+    :param unread: expected number of skipped blocks.
+    """
+    data = BytesIO()
+    with ZipFile(data, "w") as archive:
+        archive.writestr(
+            "word/document.xml",
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>'
+            f"<w:p><w:r><w:t>OZ 01.01.0010 Dachplatte</w:t></w:r></w:p>{hidden}"
+            "</w:body></w:document>",
+        )
+    assert read_context(data.getvalue())[1] == unread
+    with pymupdf.open() as pdf:
+        pdf.new_page().insert_text((50, 50), "01.01.0010. Dachplatte\nDicke: offen")
+        source = pdf.tobytes()
+    app = make_app(tmp_path)
+    run = _request(app, "/upload?name=LV.pdf", source, "application/pdf")[1]["Location"]
+    _request(app, run + "/attachment?name=A.docx", data.getvalue(), "application/octet-stream")
+    report = _request(app, run + "/report?download=1")[2].decode()
+    assert (f"{unread} Textblöcke der Anlage nicht bewertet" in report) == bool(unread)
+
+
 def test_docx_cell_and_heading_order() -> None:
     """Keep a styled heading, two table cells and the next paragraph in source order."""
     data = BytesIO()
@@ -465,7 +509,8 @@ def test_docx_cell_and_heading_order() -> None:
           <w:tc><w:p><w:r><w:t>8 mm</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
           <w:p><w:r><w:t>Ende</w:t></w:r></w:p></w:body></w:document>""",
         )
-    entries = read_context(data.getvalue())
+    entries, unread = read_context(data.getvalue())
+    assert unread == 0
     assert [(e["id"], e["text"]) for e in entries] == [
         ("P1", "Dach"),
         ("T1R1C1", "Beton"),

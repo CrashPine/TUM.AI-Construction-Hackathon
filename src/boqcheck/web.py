@@ -166,8 +166,9 @@ def _attach(env: dict, filename: str, result: dict) -> dict:
         if prior["digest"] != digest:
             raise ValueError("Diese Prüfung enthält bereits eine DOCX-Anlage.")
         return result
+    entries, unread = read_context(data)
     return compare_attachment(
-        result, {"name": filename, "digest": digest, "entries": read_context(data)}
+        result, {"name": filename, "digest": digest, "entries": entries, "unread": unread}
     )
 
 
