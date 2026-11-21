@@ -61,6 +61,8 @@ def test_semantic_review_exports_grounded_model_finding(
     assert any("verworfen: 2" in warning for warning in result["warnings"])
     log = Path(result["findings_log"]).read_text(encoding="utf-8")
     assert "Widerspruchskandidat" in log
+    assert "**Erkennung:** Semantische Modellprüfung" in log
+    assert "**Modell:** test" in log
     assert "remain ON" in log and "remain OFF" in log
     with pymupdf.open(result["annotated_pdf"]) as document:
         highlights = [

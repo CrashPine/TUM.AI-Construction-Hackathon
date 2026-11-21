@@ -33,6 +33,7 @@ def test_review_exports_both_passages(
     assert result["candidates"] == 1
     log = Path(result["findings_log"]).read_text(encoding="utf-8")
     assert "Klärungsbedarf" in log
+    assert "**Erkennung:** Regelprüfung" in log
     assert "Bieterfrage" in log
     with pymupdf.open(result["annotated_pdf"]) as reviewed, pymupdf.open(stream=original) as source:
         assert len(reviewed) == len(source)

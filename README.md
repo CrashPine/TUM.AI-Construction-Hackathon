@@ -24,7 +24,8 @@ Agent integrations can call `boqcheck.review_pdf.review_pdf(filename, pdf_bytes,
 The baseline checks forward references in drawing positions and differing maximum aggregate
 sizes for Schachtvierungen. Review the resulting candidates before using the proposed
 Bieterfragen. Textless pages are reported as skipped. See the
-[PDF review architecture](docs/pdf-contradiction-review.md) for the data flow and remaining work.
+[PDF review architecture](docs/pdf-contradiction-review.md) for the data flow and the
+[PDF review checklist](docs/pdf-review-checklist.md) for completed checks and open work.
 
 
 ### Semantic review with Ollama

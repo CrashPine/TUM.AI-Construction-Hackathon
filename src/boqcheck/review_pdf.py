@@ -82,7 +82,15 @@ def review_pdf(
             assessment = (
                 "Widerspruchskandidat" if finding.status == "conflict" else "Klärungsbedarf"
             )
-            section = [f"## {identifier} · {assessment}", "", finding.explanation, ""]
+            method = "Semantische Modellprüfung" if finding.kind == "semantic" else "Regelprüfung"
+            section = [
+                f"## {identifier} · {assessment}",
+                "",
+                f"**Erkennung:** {method}",
+                "",
+                finding.explanation,
+                "",
+            ]
             for passage, other in (finding.passages, finding.passages[::-1]):
                 comment = (
                     f"{identifier} · {assessment}\n"
@@ -119,10 +127,12 @@ def review_pdf(
             f"für Schachtvierungen. **Semantische Modellprüfung:** {coverage}.",
             "",
         ]
+        if semantic is not None:
+            summary.extend([f"**Modell:** {semantic.model}", ""])
         summary.extend(f"- {warning}" for warning in warnings)
         summary.append("")
         if not findings:
-            summary.extend(["Die ausgeführten Regeln haben keine Kandidaten gefunden.", ""])
+            summary.extend(["Die ausgeführten Prüfungen haben keine Kandidaten gefunden.", ""])
 
         if output.exists():
             raise FileExistsError(output)
