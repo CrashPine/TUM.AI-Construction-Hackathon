@@ -82,4 +82,7 @@ verification.
   0.75 and 0.90. The thresholds also admitted nine and three additional selections respectively.
 - [ ] Evaluate independent projects with reviewer-labelled comparable positions. Same-LV
   editions validate retrieval only and do not count as independent quantity or price peers.
+- [x] Freeze an offline acceptance baseline: exact rule findings for all 43 supported samples,
+  partial results for unavailable, invalid or incomplete model output, and an opt-in real-model
+  tier. Verified that a changed anchor and a valid fake response fail.
 - [ ] Add the separate legal retrieval demo after the core workflow.
