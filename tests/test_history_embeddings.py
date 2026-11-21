@@ -205,3 +205,43 @@ def raising_embedding(*args: object) -> None:
     :raises OSError: for simulated connection failure.
     """
     raise OSError("offline")
+
+
+def test_quantity_anomaly_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Flag a labelled outlier per m2 of roof by the configured rule, never by similarity.
+
+    :param monkeypatch: substitute the local embedding transport.
+    """
+    monkeypatch.setattr(history_embeddings, "embed", matching_embedding)
+    peers = [replace(peer(p), quantity=Decimal(q)) for p, q in (("a", 90), ("b", 100), ("c", 110))]
+    anomaly = (Item("1", "Roof deck", "", Decimal(200), "m2"),)
+
+    def quantity(dataset: HistoryDataset, items: tuple[Item, ...] = anomaly) -> dict:
+        """Return the quantity comparison of the only position.
+
+        :param dataset: historical dataset.
+        :param items: current positions.
+        :returns: quantity result.
+        """
+        return report_history(dataset, items)[0]["results"]["quantity"]
+
+    result = quantity(dataset_with(peers))
+    assert (result["status"], result["value"], result["deviation"]) == ("anomaly", 2, 1)
+    assert (result["low"], result["high"], result["min_projects"]) == (
+        Decimal("0.9"),
+        Decimal("1.1"),
+        3,
+    )
+    assert result["basis"][:4] == ("roof", "deck", "m2", "m2 roof")
+    assert [p["sources"] for p in result["peers"]][0] == [("OZ 1", Decimal("0.9"))]
+    assert quantity(dataset_with(peers), ITEMS)["status"] == "within_reference"
+    assert quantity(dataset_with(peers, embedding_model=""))["status"] == "anomaly"
+    relaxed = dataset_with(peers, deviation_threshold=Decimal("1.5"))
+    assert quantity(relaxed)["status"] == "within_reference"
+    wider = [*peers, replace(peer("d"), scale_unit="m2 facade")]
+    result = quantity(dataset_with(wider, min_projects=4))
+    assert result["status"] == "insufficient_evidence" and "median" not in result
+    assert result["excluded"] == {"different_basis": 1} and len(result["peers"]) == 3
+    unscaled = dataset_with(peers)
+    unscaled.current["1"] = replace(unscaled.current["1"], scale=None)
+    assert quantity(unscaled) == {"status": "unavailable", "missing": ["scale"]}

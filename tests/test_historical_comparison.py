@@ -120,3 +120,29 @@ def test_dataset_validation(tmp_path: Path) -> None:
         load_dataset(_dataset(tmp_path, synthetic=False))
     approved = load_dataset(_dataset(tmp_path, synthetic=False, authorization="Vertrag 7"))
     assert approved.authorization == "Vertrag 7"
+
+
+def test_anomaly_settings(tmp_path: Path) -> None:
+    """Read the minimum peer count and deviation, rejecting values that are not exact numbers.
+
+    :param tmp_path: folder for the manifests.
+    """
+    default = load_dataset(_dataset(tmp_path))
+    assert (default.min_projects, default.deviation_threshold) == (3, D("0.30"))
+    dataset = load_dataset(_dataset(tmp_path, min_projects=4, deviation_threshold=1))
+    assert (dataset.min_projects, dataset.deviation_threshold) == (4, D(1))
+    assert load_dataset(_dataset(tmp_path, deviation_threshold=0.5)).deviation_threshold == D("0.5")
+    for changes in (
+        dict(min_projects=True),
+        dict(min_projects=1),
+        dict(min_projects=3.0),
+        dict(deviation_threshold=True),
+        dict(deviation_threshold=0),
+        dict(deviation_threshold=-0.1),
+        dict(deviation_threshold=None),
+        dict(deviation_threshold="0.3"),
+        dict(deviation_threshold=float("nan")),
+        dict(deviation_threshold=float("inf")),
+    ):
+        with pytest.raises(ValueError, match="Invalid historical dataset"):
+            load_dataset(_dataset(tmp_path, **changes))

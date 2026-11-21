@@ -82,7 +82,7 @@ def compare_history(
     :param min_projects: minimum number of independent historical projects.
     :param threshold: relative deviation from the median required outside the peer range.
     :returns: quantity and price results with status, comparison basis, peer evidence,
-        missing current fields and counts of skipped peers.
+        the applied rule, missing current fields and counts of skipped peers.
     :raises ValueError: if the comparison settings are invalid.
     """
     if min_projects < 2 or not _positive(threshold):
@@ -115,7 +115,14 @@ def compare_history(
             {"project": project, "value": median([v for _, v in records]), "sources": records}
             for project, records in sorted(projects.items())
         ]
-        result = {"status": "insufficient_evidence", "basis": basis, "value": value, "peers": peers}
+        result = {
+            "status": "insufficient_evidence",
+            "basis": basis,
+            "value": value,
+            "peers": peers,
+            "min_projects": min_projects,
+            "threshold": threshold,
+        }
         if excluded:
             result["excluded"] = dict(excluded)
         if len(peers) >= min_projects:
