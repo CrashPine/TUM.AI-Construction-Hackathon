@@ -370,7 +370,7 @@ def review_view(
         spreadsheet = bool(result.get("sheet_references"))
         version = escape(gaeb["version"] or "unbekannt")
         phase = escape(gaeb["phase"] or "unbekannt")
-        label = "XLSX" if spreadsheet else f"GAEB {version} · Phase {phase}"
+        label = "XLSX (experimentell)" if spreadsheet else f"GAEB {version} · Phase {phase}"
         content.append(
             f'<p class="badge">{label} · {gaeb["items"]} Positionen</p>'
             f"<p>Preisprüfung: {gaeb['arithmetic_checked']} Gesamtbeträge geprüft, "

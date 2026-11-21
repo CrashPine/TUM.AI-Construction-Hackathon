@@ -23,6 +23,7 @@ from boqcheck.history import initialize, promote, replay
 from boqcheck.history_report import load_dataset
 from boqcheck.web import make_app
 from boqcheck.web_gaeb import review_legacy
+from boqcheck.xlsx_lv import read_xlsx
 
 _ROOF = Path(__file__).resolve().parents[1] / "data" / "raw" / "LV_09_Porenbetondach.pdf"
 _INCOMPLETE = (
@@ -866,10 +867,29 @@ def test_xlsx_sheet_row_report(tmp_path: Path) -> None:
     review = _request(app, run)[2].decode()
     assert 'href="#position-1"' in review and 'id="position-1"' in review
     report = _request(app, run + "/report?download=1")[2].decode()
-    assert "XLSX · 2 Positionen" in report
+    assert "XLSX (experimentell) · 2 Positionen" in report
     assert "Blatt Dach · Zeile 2" in report and "Blatt Dach · Zeile 4" in report
     assert "20.00" in report and "19.99" in report and "=1+1" in report
     assert "Blatt Hinweise" in report
+
+
+def test_xlsx_rejects_inexact_text_cells() -> None:
+    """Reject numeric OZ cells and text-column formulas instead of misreading them."""
+    workbook = Workbook()
+    workbook.active.append(["OZ", "Kurztext", "Menge", "ME"])
+    workbook.active.append([1.10, "Rohr", 1, "m"])
+    workbook.active.append(["01.20", "=B2", 1, "m"])
+    workbook.active.append(["01.30", "Dach", 0, "m2"])
+    data = BytesIO()
+    workbook.save(data)
+    boq, references = read_xlsx("x.xlsx", data.getvalue())
+    assert [item.oz for item in boq.items] == ["01.30"]
+    assert boq.items[0].quantity == 0
+    assert references == ["Blatt Sheet · Zeile 4"]
+    assert boq.warnings == (
+        "Blatt Sheet · Zeile 2: OZ ist keine Textzelle; Position nicht geprüft.",
+        "Blatt Sheet · Zeile 3: Formel in Kurztext; Position nicht geprüft.",
+    )
 
 
 def test_historical_comparison_export(tmp_path: Path) -> None:

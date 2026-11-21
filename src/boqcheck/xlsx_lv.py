@@ -46,6 +46,26 @@ def read_xlsx(name: str, data: bytes) -> tuple[BoQ, list[str]]:
                     fields = {key: value for key, value in fields.items() if key in known}
                     if all(value is None or value == "" for value in fields.values()):
                         continue
+                    # A numeric OZ cell has already lost its padding ("01.10" became 1.1).
+                    if not isinstance(fields.get("OZ"), str):
+                        warnings.append(
+                            f"Blatt {sheet.title} · Zeile {row}: OZ ist keine Textzelle; "
+                            "Position nicht geprüft."
+                        )
+                        continue
+                    if formula := next(
+                        (
+                            key
+                            for key in ("OZ", "Kurztext", "ME")
+                            if str(fields.get(key) or "")[:1] == "="
+                        ),
+                        None,
+                    ):
+                        warnings.append(
+                            f"Blatt {sheet.title} · Zeile {row}: Formel in {formula}; "
+                            "Position nicht geprüft."
+                        )
+                        continue
                     numbers, invalid = {}, []
                     for label, code in _NUMBERS.items():
                         value = fields.get(label)
