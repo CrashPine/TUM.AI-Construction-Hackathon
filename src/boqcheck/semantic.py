@@ -19,7 +19,10 @@ Compare statements only when they concern the same entity, scope and conditions.
 Check for exceptions, alternatives and references before calling two statements incompatible.
 Use needs_scope_check when a specific inconsistency exists but applicability is uncertain.
 Use conflict only when the two statements cannot both hold under the stated conditions.
-In cross comparisons the two sources must come from different groups.
+If `right` is empty, compare different lines within `left`. Otherwise compare one line
+from `left` with one line from `right`.
+Opposite required states (open vs closed, enabled vs disabled) for the same object
+at the same time are contradictions, as are mutually exclusive required values.
 Return a JSON object {"findings": [...]} with no other text.
 Each finding must have status, left_id, right_id, left_quote, right_quote, explanation, question.
 Quotes must be exact nonempty excerpts from their respective source lines.
