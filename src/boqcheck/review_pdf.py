@@ -16,6 +16,7 @@ from .pdf_annotate import annotate
 from .pdf_extract import Line, extract
 from .scope import find_scope_questions
 from .semantic import SemanticConfig, semantic_review
+from .spelling import load_lexicon
 
 
 def _reference(passage: tuple[Line, ...]) -> str:
@@ -87,16 +88,17 @@ def _model_batch(
         (
             pattern,
             Finding(
-                "semantic",
+                extra[0] if extra else "semantic",
                 tuple(
                     tuple(pages[page][index] for page, index in passage) for passage in references
                 ),
                 explanation,
                 question,
                 status,
+                spelling=tuple(extra[1]) if extra and extra[1] else None,
             ),
         )
-        for pattern, references, explanation, question, status in state["candidates"]
+        for pattern, references, explanation, question, status, *extra in state["candidates"]
     ]
     state["candidates"] = state["candidates"] + [
         (
@@ -105,6 +107,8 @@ def _model_batch(
             finding.explanation,
             finding.question,
             finding.status,
+            finding.kind,
+            finding.spelling,
         )
         for pattern, finding in pending
     ]
@@ -154,6 +158,9 @@ def review_pdf(
             warnings.append("Historische Modellprüfung teilweise offen; siehe Regelstatus.")
         origins: dict[int, list[str]] = {}
         for pattern, candidate in pending:
+            if candidate.spelling:
+                findings.append(candidate)
+                continue
             left, right = candidate.passages
             existing = next(
                 (
@@ -181,6 +188,9 @@ def review_pdf(
                 "Widerspruchskandidat" if finding.status == "conflict" else "Klärungsbedarf"
             )
             method = "Semantische Modellprüfung" if finding.kind == "semantic" else "Regelprüfung"
+            if finding.spelling:
+                assessment = "Möglicher Schreibfehler"
+                method = "Modellvorschlag mit lokalem Wortabgleich"
             if id(finding) in origins:
                 method += " · Historischer Modell-Treffer"
             category, impact = {
@@ -199,6 +209,10 @@ def review_pdf(
                 "open_pricing": (
                     "Offene Vergütung",
                     "Erforderlicher Aufwand könnte im Angebot unberücksichtigt bleiben.",
+                ),
+                "spelling": (
+                    "Rechtschreibung",
+                    "Die Leistungsbeschreibung könnte missverständlich sein.",
                 ),
             }.get(finding.kind, ("Widerspruch", "Siehe Begründung des Modellvorschlags."))
             records.append(
@@ -232,6 +246,15 @@ def review_pdf(
                     ],
                 }
             )
+            if finding.spelling:
+                token, correction, start, end = finding.spelling
+                records[-1].update(
+                    original_word=token,
+                    correction=correction,
+                    span_start=start,
+                    span_end=end,
+                    evidence="Exaktes Originalwort und lokal bestätigter Korrekturvorschlag",
+                )
             section = [
                 f"## {identifier} · {assessment}",
                 "",
@@ -249,7 +272,14 @@ def review_pdf(
                 if len(finding.passages) == 1 and finding.question:
                     comment += f"\n\nBieterfrage: {finding.question}"
                 page = passage[0].page
-                count = annotate(document[page], passage, identifier, comment)
+                geometry = passage
+                if finding.spelling:
+                    token, correction, _, _ = finding.spelling
+                    comment += f"\n\nVorschlag: {token} → {correction}"
+                    word = document[page].search_for(token, clip=passage[0].quad.rect, quads=True)
+                    if len(word) == 1:
+                        geometry = (replace(passage[0], quad=word[0]),)
+                count = annotate(document[page], geometry, identifier, comment)
                 for subtype in ("Highlight", "Text")[:count]:
                     expected[page, identifier, comment, subtype] += 1
                 outcome = {
@@ -264,6 +294,8 @@ def review_pdf(
                 )
             if finding.question:
                 section.extend([f"**Bieterfrage:** {finding.question}", ""])
+            if finding.spelling:
+                section.extend([f"**Vorschlag:** {token} → {correction}", ""])
             details.extend(section)
 
         stem = re.sub(r"[^\w.-]+", "_", Path(filename).stem).strip("._") or "review"
@@ -337,15 +369,29 @@ def main() -> None:
     parser.add_argument("--model", help="model ID exposed by the endpoint")
     parser.add_argument("--max-requests", type=int, default=24, help="semantic comparison budget")
     parser.add_argument("--timeout", type=float, default=90, help="seconds per model comparison")
+    parser.add_argument(
+        "--spelling", action="store_true", help="check German spelling with the model"
+    )
+    parser.add_argument("--lexicon", type=Path, help="local project terms, one per line")
     args = parser.parse_args()
     if bool(args.endpoint) != bool(args.model) or args.max_requests < 1 or not args.timeout > 0:
         parser.error("provide --endpoint and --model together and positive comparison limits")
-    semantic = (
-        SemanticConfig(args.endpoint, args.model, args.max_requests, args.timeout)
-        if args.endpoint
-        else None
-    )
+    if (args.spelling or args.lexicon) and not args.endpoint:
+        parser.error("spelling and lexicon require a configured local model")
     try:
+        lexicon = load_lexicon(args.lexicon) if args.lexicon else frozenset()
+        semantic = (
+            SemanticConfig(
+                args.endpoint,
+                args.model,
+                args.max_requests,
+                args.timeout,
+                spelling=args.spelling or bool(args.lexicon),
+                lexicon=lexicon,
+            )
+            if args.endpoint
+            else None
+        )
         result = review_pdf(args.pdf.name, args.pdf.read_bytes(), args.output, semantic=semantic)
     except (ValueError, OSError, RuntimeError) as error:
         parser.exit(2, json.dumps({"status": "error", "message": str(error)}) + "\n")

@@ -41,6 +41,12 @@ uv run python -m boqcheck.web --endpoint http://127.0.0.1:44445/api/chat --model
 Select the model checkbox on a PDF upload to use it for that run. Without the checkbox the
 existing rules run on their own. The report records model coverage or unavailability.
 The web server defaults to six model comparisons per upload (override with `--max-requests`).
+Add `--spelling` to the web or PDF CLI command to check German spelling within the same model
+budget. To recognize additional trade terms and brands, add `--lexicon PATH` with a UTF-8 list
+containing one accepted word per line. A proposal appears only if its original token is found in
+the cited source and a nearby replacement is supported by the local dictionary or lexicon.
+The reviewer can edit the replacement before exporting the risk report. The source PDF text
+remains intact.
 
 Review state and generated files are available for the lifetime of the local server. Download
 the report, annotated PDF or log before stopping it. To retain a confirmed PDF rule case,

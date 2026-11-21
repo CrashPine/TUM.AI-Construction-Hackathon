@@ -23,6 +23,7 @@ class Finding:
     :ivar explanation: German explanation of the discrepancy and its uncertainty.
     :ivar question: proposed German Bieterfrage.
     :ivar status: conflict or needs_scope_check.
+    :ivar spelling: original word, replacement and exact line offsets for a typo.
     """
 
     kind: str
@@ -30,6 +31,7 @@ class Finding:
     explanation: str
     question: str
     status: str = "needs_scope_check"
+    spelling: tuple[str, str, int, int] | None = None
 
 
 def _drawing_findings(lines: list[Line]) -> Iterator[Finding]:

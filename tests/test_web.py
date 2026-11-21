@@ -380,3 +380,71 @@ def test_model_pattern_is_promoted_and_grounded_in_a_new_pdf(
     assert "Bestätigt" in page and "Welcher Zustand gilt für Ventil B?" in page
     assert _request(recovered, result + "/resume", b"")[0].startswith("400")
     assert len(prompts) == 3
+
+
+def test_german_spelling_is_grounded_and_editable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Require dictionary evidence and preserve the original token through review.
+
+    :param tmp_path: temporary PDF artifacts directory.
+    :param monkeypatch: fixture for replacing model inference.
+    """
+    config = semantic.SemanticConfig(
+        "http://127.0.0.1:44445/api/chat",
+        "test",
+        max_requests=1,
+        spelling=True,
+        lexicon=frozenset({"montagge"}),
+    )
+
+    def suggest(selected: semantic.SemanticConfig, payload: dict) -> list[dict]:
+        """Return a typo, an accepted project word and unsupported proposals.
+
+        :param selected: model review configuration.
+        :param payload: excerpts from the current uploaded PDF.
+        :returns: simulated spelling proposals.
+        """
+        assert selected.spelling and payload["check_spelling"] is True
+        source = payload["left"][0]["id"]
+        return [
+            {
+                "kind": "spelling",
+                "source_id": identifier,
+                "token": token,
+                "correction": replacement,
+                "explanation": "Der Satz verlangt ein Verb.",
+            }
+            for identifier, token, replacement in (
+                (source, "ausführren", "ausführen"),
+                (source, "Montagge", "Montage"),
+                (source, "Montage", "Montagge"),
+                (source, "BETTON", "Beton"),
+                (source, "Vorbereittung", "Vorbereitung"),
+                ("L999", "ausführren", "ausführen"),
+            )
+        ]
+
+    monkeypatch.setattr(semantic, "_request", suggest)
+    app = make_app(tmp_path, semantic=config)
+    with pymupdf.open() as document:
+        document.new_page().insert_text(
+            (72, 72), "Die Montagge fachgerecht ausführren. BETTON Vorbereittung-"
+        )
+        response = _request(
+            app, "/upload?name=lv.pdf&semantic=1", document.tobytes(), "application/pdf"
+        )
+    run = response[1]["Location"]
+    page = _request(app, run)[2].decode()
+    assert page.count('<article id="BG-') == 1
+    assert "Originalwort: <strong>ausführren" in page
+    assert 'value="ausführen"' in page
+    with pymupdf.open(stream=_request(app, run + "/pdf")[2]) as output:
+        source = output[0]
+        assert "ausführren" in source.get_text()
+        assert "ausführren → ausführen" in source.first_annot.info["content"]
+    edited = urlencode({"status-BG-001": "confirmed", "correction-BG-001": "durchführen"}).encode()
+    assert _request(app, run, edited, "application/x-www-form-urlencoded")[0].startswith("303")
+    report = _request(app, run + "/report")[2].decode()
+    assert "Originalwort: <strong>ausführren" in report
+    assert "Korrekturvorschlag: <strong>durchführen" in report

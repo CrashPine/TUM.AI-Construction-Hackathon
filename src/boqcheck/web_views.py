@@ -171,6 +171,18 @@ def _finding(base: str, finding: dict, report: bool, history: bool) -> str:
                 f"{ref}</a>"
             )
         pieces.append(f"<div>{ref}<blockquote>{escape(source['excerpt'])}</blockquote></div>")
+    if "original_word" in finding:
+        original = escape(finding["original_word"])
+        correction = escape(finding["correction"])
+        pieces.append(f"<p>Originalwort: <strong>{original}</strong></p>")
+        if report:
+            pieces.append(f"<p>Korrekturvorschlag: <strong>{correction}</strong></p>")
+        else:
+            pieces.append(
+                f'<label for="correction-{identifier}">Korrekturvorschlag</label>'
+                f'<input id="correction-{identifier}" name="correction-{identifier}" '
+                f'value="{correction}" maxlength="120" required>'
+            )
     if not report:
         options = "".join(
             f'<option value="{value}"{" selected" if value == status else ""}>{label}</option>'
@@ -180,11 +192,14 @@ def _finding(base: str, finding: dict, report: bool, history: bool) -> str:
             [
                 f'<label for="status-{identifier}">Prüfstatus</label>',
                 f'<select id="status-{identifier}" name="status-{identifier}">{options}</select>',
-                f'<label for="question-{identifier}">Bieterfrage</label>',
-                f'<textarea id="question-{identifier}" name="question-{identifier}" rows="3" '
-                f'maxlength="2000">{escape(finding["question"])}</textarea>',
             ]
         )
+        if "original_word" not in finding:
+            pieces.append(
+                f'<label for="question-{identifier}">Bieterfrage</label>'
+                f'<textarea id="question-{identifier}" name="question-{identifier}" rows="3" '
+                f'maxlength="2000">{escape(finding["question"])}</textarea>'
+            )
         if history and finding.get("rule") in RULES | {"semantic"}:
             pieces.append(
                 f'<label><input type="checkbox" name="promote-{identifier}"> '

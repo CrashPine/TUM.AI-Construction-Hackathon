@@ -22,6 +22,7 @@ from .history_jobs import (
 )
 from .review_pdf import review_pdf
 from .semantic import SemanticConfig
+from .spelling import load_lexicon
 from .web_gaeb import review_x83
 from .web_views import STATUSES, review_view, upload_view
 
@@ -65,7 +66,10 @@ def _update(
         question = fields.get(f"question-{identifier}", [""])[0]
         if status not in STATUSES or len(question) > 2000:
             raise ValueError("Ungültige Prüfdaten.")
-        changes.append((finding, status, question))
+        correction = fields.get(f"correction-{identifier}", [finding.get("correction", "")])[0]
+        if "correction" in finding and (not correction.strip() or len(correction) > 120):
+            raise ValueError("Eine Korrektur mit höchstens 120 Zeichen ist erforderlich.")
+        changes.append((finding, status, question, correction))
         if f"promote-{identifier}" in fields:
             rule = finding.get("rule")
             if history_db is None or status != "confirmed" or rule not in RULES | {"semantic"}:
@@ -93,8 +97,10 @@ def _update(
         if not reviewer or len(reviewer) > 120 or len(trade) > 120 or severity is None:
             raise ValueError("Bitte Prüfer und gültige Priorität für die Historie angeben.")
         promote(history_db, source, result["document_hash"], reviewer, trade, severity, cases)
-    for finding, status, question in changes:
+    for finding, status, question, correction in changes:
         finding.update(review_status=status, question=question)
+        if "correction" in finding:
+            finding["correction"] = correction.strip()
 
 
 def _analyse(
@@ -189,6 +195,8 @@ def _resume(
         old = saved.get(finding["id"])
         if old and old["sources"] == finding["sources"]:
             finding.update(question=old["question"], review_status=old["review_status"])
+            if "correction" in old and "correction" in finding:
+                finding["correction"] = old["correction"]
         else:
             finding["review_status"] = "open"
     result["can_resume"] = _has_pending(result)
@@ -330,11 +338,28 @@ def main() -> None:
     parser.add_argument("--endpoint", help="loopback Ollama or chat completions URL")
     parser.add_argument("--max-requests", type=int, default=6)
     parser.add_argument("--timeout", type=float, default=90, help="seconds per model comparison")
+    parser.add_argument(
+        "--spelling", action="store_true", help="check German spelling with the model"
+    )
+    parser.add_argument("--lexicon", type=Path, help="local project terms, one per line")
     args = parser.parse_args()
     if bool(args.endpoint) != bool(args.model) or args.max_requests < 1 or not args.timeout > 0:
         parser.error("provide --endpoint and --model together and positive comparison limits")
+    if (args.spelling or args.lexicon) and not args.endpoint:
+        parser.error("spelling and lexicon require a configured local model")
+    try:
+        lexicon = load_lexicon(args.lexicon) if args.lexicon else frozenset()
+    except (ValueError, OSError) as error:
+        parser.error(str(error))
     semantic = (
-        SemanticConfig(args.endpoint, args.model, args.max_requests, args.timeout)
+        SemanticConfig(
+            args.endpoint,
+            args.model,
+            args.max_requests,
+            args.timeout,
+            spelling=args.spelling or bool(args.lexicon),
+            lexicon=lexicon,
+        )
         if args.endpoint
         else None
     )
