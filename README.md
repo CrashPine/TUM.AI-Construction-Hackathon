@@ -64,6 +64,7 @@ of these as separate files.
 | `data/raw/` | the organizers' files, read-only |
 | `src/boqcheck/` | Python package: BoQ data model and parsers |
 | `tests/` | pytest tests |
+| `docs/research/` | research reports: [BoQ error checks and price sources](docs/research/2026-11-21-boq-errors-and-pricing.md) |
 | `pyproject.toml`, `uv.lock` | project settings and locked dev tool versions |
 
 ## How we work
