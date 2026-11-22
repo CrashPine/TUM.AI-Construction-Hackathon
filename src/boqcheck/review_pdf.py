@@ -371,6 +371,7 @@ def review_pdf(
             (artifacts / log_name).write_text("\n".join(summary + details), encoding="utf-8")
             artifacts.rename(output)
 
+    positions, position_count = pdf_positions(pages)
     return {
         "status": "partial" if warnings else "complete",
         "annotated_pdf": str(output / pdf_name),
@@ -380,7 +381,8 @@ def review_pdf(
         "text_pages": len(pages) - len(skipped),
         "rule_scope": rule_scope(pages),
         "attachment_properties": pdf_properties(pages),
-        "attachment_positions": pdf_positions(pages),
+        "attachment_positions": positions,
+        "position_count": position_count,
         "findings": records,
         "model_history": model_history,
         **({"checkpoint": state} if templates else {}),
