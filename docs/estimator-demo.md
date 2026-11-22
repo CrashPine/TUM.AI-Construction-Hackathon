@@ -92,12 +92,14 @@ these:
 If a document has an ambiguous statement for a field that both documents state for a position,
 there is no finding. The review and the report count and list the pair as **nicht automatisch
 verglichen (mehrdeutige Angabe)**, with all excerpts; in the review, the sources are links. If
-the model comparison cites a line with one of these markers, a conflict becomes a scope check.
+the model comparison cites a line with a qualifier, `oder` or a range, a conflict becomes a
+scope check.
 
-In the 44 samples, the reader finds 15 exact statements (12 GAEB, 3 PDF), 261 ambiguous
-statements (141 GAEB, 120 PDF) and no open value. The old reader found 12 exact values (11 GAEB,
-1 PDF) and skipped 3 unsupported GAEB values. 10 fields (7 GAEB, 3 PDF) have one exact
-statement in their position and can be compared; before, 11 fields (10 GAEB, 1 PDF) could.
+In the 34 sample PDFs and 9 GAEB files, the reader finds 15 exact statements (12 GAEB, 3 PDF),
+261 ambiguous statements (141 GAEB, 120 PDF) and no open value. The old reader found 12 exact
+values (11 GAEB, 1 PDF) and skipped 3 unsupported GAEB values. 10 fields (7 GAEB, 3 PDF) have
+one exact statement in their position and can be compared; before, 11 fields (10 GAEB, 1 PDF)
+could.
 
 Limitations:
 
@@ -114,8 +116,9 @@ Limitations:
 - A free-text mention counts as a statement. In 4 GAEB positions (2 positions of one BoQ in
   2 files), a range in free text stops the comparison of an exact Schichtdicke; the pair is
   listed instead.
-- `bis`, `über` and `oder` also occur in text that does not qualify the value. A model
-  conflict that cites such a line becomes a scope check.
+- The model status cap uses only the qualifiers, `oder` and ranges. `bis`, `über` and `oder`
+  also occur in text that does not qualify the value. Words after the value, an unsupported
+  unit or a free-text mention do not cap the status.
 - A compound label (`Wanddicke: 25 cm`) is only listed, never compared. A statement that
   continues on the next line without a label and colon cites only its first line.
 
@@ -154,5 +157,7 @@ Limitations:
 - The unit is not compared, and there is no fuzzy matching.
 - If a Kurztext itself ends with a word in brackets, for example `[PE]`, the DOCX heading
   loses that word and matches no position. No Kurztext in the samples ends so.
+- In the two-cell layout, the Kurztext line is read like the other position lines, so a field
+  named in it counts as a statement. No sample Kurztext names a field.
 - The model comparison of PDF positions is tested with a mocked model only. The statement reader
   is tested with real PDF and GAEB samples, but only with synthetic DOCX files.
