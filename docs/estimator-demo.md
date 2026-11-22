@@ -65,15 +65,39 @@ Limitations:
 ## DOCX attachment to a GAEB review
 
 A DOCX attached to an X83 or GAEB 90 review is compared with the parsed positions. The
-Kurztext of a position is its component. Labelled values in its Langtext, for example
-`Dicke: 100 mm`, are read with the same parser as in the PDF comparison. A value is compared
-only if the DOCX has a heading with the same OZ and the same Kurztext and each document states
-the field once. OZ levels are compared as numbers, so `3.1.4` matches `03.01.0004`; the
+Kurztext of a position is its component. Its Langtext is read with the same statement reader
+as the PDF positions (see below). A value is compared only if the DOCX has a heading with the
+same OZ and the same Kurztext and each document states the field once. OZ levels are compared
+as numbers, so `3.1.4` matches `03.01.0004`; the
 PDF comparison uses the same rule. An index letter must be identical, and a two-level OZ needs
 the prefix `OZ` (`OZ 2.9`). Case and spacing of the Kurztext do not count. The LV source of a
 finding links to the position row. The review and the report show how many values were compared
 and how many DOCX headings have no position with the same OZ and Kurztext. The experimental XLSX
 review uses the same comparison; its rows have no Langtext, so it compares no values.
+
+The reader looks for the fields Dicke, Schichtdicke, Oberflächengüte, Oberflächenqualität and
+Lieferverantwortung in the LV lines of a position and in all paragraphs of a DOCX block: the
+heading and the paragraphs after it, up to the next heading or table. A line that ends with a
+field label (`Dicke:`) and a next line that starts with the value, also after a qualifier, give
+one statement, and the excerpt shows both lines. A line with parts separated by `;`, for
+example `Farbe: rot; Dicke: 2 mm`, gives one statement for each part. Each statement is one of
+these:
+
+- exact: the label and a supported value only (`Dicke: 20 cm`).
+- open: `offen` or a similar word. Open values work as before.
+- ambiguous: a qualifier such as `ca.`, `mind.`, `max.`, `bis`, `über` or `>`, `oder`, a range
+  (`10 - 15 cm`), words after the value (`über Rohrscheitel`), an unsupported unit, or a field
+  named in free text or in a compound label (`Wanddicke`).
+
+If a document has an ambiguous statement for a field that both documents state for a position,
+there is no finding. The review and the report count and list the pair as **nicht automatisch
+verglichen (mehrdeutige Angabe)**, with all excerpts; in the review, the sources are links. If
+the model comparison cites a line with one of these markers, a conflict becomes a scope check.
+
+In the 44 samples, the reader finds 15 exact statements (12 GAEB, 3 PDF), 261 ambiguous
+statements (141 GAEB, 120 PDF) and no open value. The old reader found 12 exact values (11 GAEB,
+1 PDF) and skipped 3 unsupported GAEB values. 10 fields (7 GAEB, 3 PDF) have one exact
+statement in their position and can be compared; before, 11 fields (10 GAEB, 1 PDF) could.
 
 Limitations:
 
@@ -87,6 +111,13 @@ Limitations:
   finding, because GAEB reviews have no open-scope finding.
 - The tests combine real GAEB samples with small synthetic DOCX files; there is no real DOCX
   for a GAEB sample.
+- A free-text mention counts as a statement. In 4 GAEB positions (2 positions of one BoQ in
+  2 files), a range in free text stops the comparison of an exact Schichtdicke; the pair is
+  listed instead.
+- `bis`, `über` and `oder` also occur in text that does not qualify the value. A model
+  conflict that cites such a line becomes a scope check.
+- A compound label (`Wanddicke: 25 cm`) is only listed, never compared. A statement that
+  continues on the next line without a label and colon cites only its first line.
 
 ## DOCX attachment to a PDF review
 
@@ -108,7 +139,7 @@ The 25 sample PDFs with OZs have 970 positions; 792 are read. With the real
 `LV-Positionen.docx` and `Leistungsverzeichnis.pdf`, 209 of 274 positions are read and 16 of
 the 40 headings match. Of the other 24 headings, 16 name a read position with another Kurztext
 and 8 name a position that is not read. The DOCX has no labelled values, so no value is
-compared. The source BoQ of the DOCX is not confirmed.
+compared or listed. The source BoQ of the DOCX is not confirmed.
 
 Limitations:
 
@@ -123,4 +154,5 @@ Limitations:
 - The unit is not compared, and there is no fuzzy matching.
 - If a Kurztext itself ends with a word in brackets, for example `[PE]`, the DOCX heading
   loses that word and matches no position. No Kurztext in the samples ends so.
-- The model comparison of PDF positions is tested with a mocked model only.
+- The model comparison of PDF positions is tested with a mocked model only. The statement reader
+  is tested with real PDF and GAEB samples, but only with synthetic DOCX files.

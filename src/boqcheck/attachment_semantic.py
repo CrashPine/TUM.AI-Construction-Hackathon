@@ -5,30 +5,12 @@ from hashlib import sha256
 from urllib.error import URLError
 
 from . import semantic
-from .attachment_scope import _heading_key, _key
+from .attachment_scope import _AMBIGUOUS, _blocks, _key
 
 # Template wording makes a difference legitimate, so the code, not the model, caps the status.
 _ALTERNATIVE = re.compile(
     r"alternativ|wahlweise|bedarfsposition|eventualposition|oder\s+gleichwertig", re.I
 )
-
-
-def _blocks(entries: list[dict]) -> dict[tuple, list[dict]]:
-    """Group DOCX paragraphs under the OZ heading that precedes them.
-
-    :param entries: attachment entries in document order.
-    :returns: heading entry and following paragraphs, keyed like the LV positions.
-    """
-    blocks, current = {}, None
-    for entry in entries:
-        if key := _heading_key(entry["text"].partition(";")[0]):
-            current = blocks.setdefault(key, [])
-            current.append(entry)
-        elif current is not None and entry["id"].startswith("P"):
-            current.append(entry)
-        else:
-            current = None
-    return blocks
 
 
 def review_attachment(result: dict, config: semantic.SemanticConfig | None) -> dict:
@@ -45,7 +27,9 @@ def review_attachment(result: dict, config: semantic.SemanticConfig | None) -> d
         summary = "Modellabgleich LV / DOCX nicht ausgeführt: kein Modell gewählt."
         return {**result, "attachment_review": {"summary": summary, "warnings": []}}
     attachment = result["attachment"]
-    blocks = _blocks(attachment["entries"])
+    blocks: dict[tuple, list[dict]] = {}
+    for key, block in _blocks(attachment["entries"]):
+        blocks.setdefault(key, []).extend(block)
     pairs = [
         (position, blocks[key])
         for position in result.get("attachment_positions", [])
@@ -89,7 +73,9 @@ def review_attachment(result: dict, config: semantic.SemanticConfig | None) -> d
                 rejected += 1
                 continue
             line, entry = left[a], right[b]
-            if _ALTERNATIVE.search(line["text"] + "\n" + entry["text"]):
+            # A qualified value ("ca. 20 cm") leaves open whether the texts really differ.
+            cited = line["text"] + "\n" + entry["text"]
+            if _ALTERNATIVE.search(cited) or _AMBIGUOUS.search(cited):
                 status = "needs_scope_check"
             # A GAEB position is one row of the review; a PDF position can span pages.
             anchor = (

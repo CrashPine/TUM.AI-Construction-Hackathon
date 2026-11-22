@@ -1,7 +1,7 @@
 """Adapt the GAEB checker result to the shared web review contract."""
 
 from . import parse
-from .attachment_scope import _property
+from .attachment_scope import _statements
 from .calculation import CalculationFinding, check_calculations
 from .gaeb90 import ItemRecords, parse_gaeb90
 from .gaeb_checks import check_boq
@@ -61,29 +61,25 @@ def _attachment_fields(items: tuple[Item, ...], references: list[str] | None = N
 
     :param items: parsed positions in source order.
     :param references: optional sheet and row labels.
-    :returns: labelled Langtext values and position lines with review-wide line IDs.
+    :returns: classified Langtext statements and position lines with review-wide line IDs.
     """
     properties, positions, number = [], [], 0
     for index, item in enumerate(items, 1):
         component = " ".join(item.short_text.split())
         reference = f"{_reference(item, index, references)} · {component}"
         texts = [line.strip() for line in item.long_text.split("\n") if line.strip()]
-        for text in texts:
-            if prop := _property(text):
-                properties.append(
-                    {
-                        "oz": item.oz,
-                        "component": component,
-                        "key": prop[0],
-                        "value": prop[1],
-                        "source": {
-                            "position": index,
-                            "oz": item.oz,
-                            "reference": reference,
-                            "excerpt": text,
-                        },
-                    }
-                )
+        for key, value, first, last in _statements(texts):
+            excerpt = "\n".join(texts[first : last + 1])
+            source = {"position": index, "oz": item.oz, "reference": reference, "excerpt": excerpt}
+            properties.append(
+                {
+                    "oz": item.oz,
+                    "component": component,
+                    "key": key,
+                    "value": value,
+                    "source": source,
+                }
+            )
         lines = [
             {"id": f"L{number + i}", "text": text} for i, text in enumerate([component, *texts])
         ]
