@@ -90,6 +90,69 @@ def _conflicting_fields(oz: str, lines: list[Line]) -> list[Finding]:
     return findings
 
 
+_DN = re.compile(r"\bDN\s*(\d+)\b", re.I)
+_DN_RANGE = re.compile(r"\bDN\s*\d+\s*(?:[/–-]|bis\b|oder\b)", re.I)
+
+
+def nominal_diameter_mismatch(title: str, description: str) -> tuple[int, int] | None:
+    """Compare single, unqualified DN designations in a title and description.
+
+    :param title: position title.
+    :param description: opening description line.
+    :returns: stated diameters if they differ.
+    """
+    left, right = _DN.findall(title), _DN.findall(description)
+    if len(left) != 1 or len(right) != 1:
+        return None
+    if any(_DN_RANGE.search(text) for text in (title, description)):
+        return None
+    if any(
+        re.search(r"\b(?:alternativ|wahlweise|Variante)\b", text, re.I)
+        for text in (title, description)
+    ):
+        return None
+    a, b = int(left[0]), int(right[0])
+    return (a, b) if a != b else None
+
+
+def _table_dn(oz: str, lines: list[Line]) -> Finding | None:
+    """Compare the title and immediately following description in an aligned position row.
+
+    :param oz: printed position number.
+    :param lines: source lines belonging to this position.
+    :returns: a scope candidate with both excerpts, if the diameters differ.
+    """
+    marker = next((line for line in lines if line.text == oz), None)
+    if marker is None:
+        return None
+    base = marker.quad.rect
+    text = [
+        line
+        for line in lines
+        if line.page == marker.page
+        and line.quad.rect.x0 > base.x1
+        and -2 <= line.quad.rect.y0 - base.y0 <= 36
+    ]
+    if len(text) < 2:
+        return None
+    title, description = text[:2]
+    if abs(title.quad.rect.y0 - base.y0) > 2 or (
+        abs(title.quad.rect.x0 - description.quad.rect.x0) > 4
+        or description.quad.rect.y0 <= title.quad.rect.y0 + 2
+    ):
+        return None
+    mismatch = nominal_diameter_mismatch(title.text, description.text)
+    if mismatch is None:
+        return None
+    left, right = mismatch
+    return Finding(
+        "nominal_diameter",
+        ((title,), (description,)),
+        f"OZ {oz}: Die Überschrift nennt DN {left}, die Beschreibung nennt DN {right}.",
+        f"Welcher Nenndurchmesser ist für OZ {oz} anzusetzen: DN {left} oder DN {right}?",
+    )
+
+
 def _title(lines: list[Line]) -> str:
     """Read a position heading for conservative adjacent-position matching.
 
@@ -119,6 +182,8 @@ def find_scope_questions(pages: list[list[Line]]) -> list[Finding]:
     for index, (oz, lines) in enumerate(groups):
         if not oz:
             continue
+        if dn_finding := _table_dn(oz, lines):
+            findings.append(dn_finding)
         findings.extend(_conflicting_fields(oz, lines))
         title = _title(lines)
         related = list(lines)

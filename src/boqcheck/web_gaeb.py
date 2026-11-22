@@ -6,6 +6,7 @@ from .calculation import CalculationFinding, check_calculations
 from .gaeb90 import ItemRecords, parse_gaeb90
 from .gaeb_checks import check_boq
 from .model import BoQ, Item
+from .scope import nominal_diameter_mismatch
 
 _TITLES = {
     "duplicate_oz": "Doppelte OZ",
@@ -146,6 +147,42 @@ def review_positions(boq: BoQ, references: list[str] | None = None) -> dict:
                 "sources": sources,
             }
         )
+    for index, item in enumerate(boq.items, 1):
+        description = next(
+            (line.strip() for line in item.long_text.splitlines() if line.strip()), ""
+        )
+        if item.oz and (pair := nominal_diameter_mismatch(item.short_text, description)):
+            left, right = pair
+            reference = _reference(item, index, references)
+            findings.append(
+                {
+                    "id": f"BG-{len(findings) + 1:03d}",
+                    "rule": "nominal_diameter",
+                    "assessment": "Klärungsbedarf",
+                    "method": "Regelprüfung",
+                    "category": "Nenndurchmesser",
+                    "evidence": "Kurz- und Langtext derselben Position",
+                    "impact": "Der Nenndurchmesser beeinflusst die Bauteilwahl und Kalkulation.",
+                    "explanation": f"Kurztext: DN {left}. Langtext: DN {right}.",
+                    "question": (
+                        f"Welcher Nenndurchmesser gilt für OZ {item.oz}: DN {left} oder DN {right}?"
+                    ),
+                    "sources": [
+                        {
+                            "position": index,
+                            "oz": item.oz,
+                            "reference": reference + " · Kurztext",
+                            "excerpt": item.short_text,
+                        },
+                        {
+                            "position": index,
+                            "oz": item.oz,
+                            "reference": reference + " · Langtext",
+                            "excerpt": description,
+                        },
+                    ],
+                }
+            )
     return {
         "findings": findings,
         "warnings": report["warnings"],

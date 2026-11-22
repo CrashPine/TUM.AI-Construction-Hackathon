@@ -233,3 +233,52 @@ def test_hem_layout_assigns_source_position_numbers() -> None:
         (133, "mind. 250 m3/h", "07.01.2"),
     ):
         assert next(line.oz for line in pages[page - 1] if fragment in line.text) == position
+
+
+def test_hem_separate_ventilation_positions_are_not_conflicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject differences in independently specified ventilation positions.
+
+    :param monkeypatch: replace Ollama with the known false-positive pattern.
+    """
+    path = Path(__file__).resolve().parents[1] / "data/raw/HEM2301-2_Gesamt-LV.pdf"
+    with pymupdf.open(path) as document:
+        pages, _ = extract(document)
+    chosen = [
+        line
+        for i in (78, 132)
+        for line in pages[i]
+        if line.text.startswith("Querschnitt weiterführende Luftleitung:")
+        or line.text in {"mind. 900 m3/h.", "mind. 250 m3/h."}
+    ]
+    assert len(chosen) == 4
+
+    def respond(config: semantic.SemanticConfig, payload: dict) -> list[dict]:
+        """Propose the two known spurious cross-position findings.
+
+        :param config: requested connection.
+        :param payload: four real citation lines.
+        :returns: correctly quoted but contextually incorrect candidates.
+        """
+        assert config.model == "test"
+        lines = payload["left"]
+        assert len(lines) == 4
+        return [
+            {
+                "left_id": a["id"],
+                "right_id": b["id"],
+                "left_quote": a["text"],
+                "right_quote": b["text"],
+                "status": "conflict",
+                "explanation": "Different values represent different requirements.",
+            }
+            for a in lines[:2]
+            for b in lines[2:]
+            if a["text"].startswith("mind.") == b["text"].startswith("mind.")
+        ]
+
+    monkeypatch.setattr(semantic, "_request", respond)
+    findings, _, summary = semantic.semantic_review([chosen], _CONFIG)
+    assert not findings
+    assert summary.startswith("1/1")

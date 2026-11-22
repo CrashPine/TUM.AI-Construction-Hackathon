@@ -220,6 +220,10 @@ def review_pdf(
                     "Materialanforderung",
                     "Die geforderte Körnung wirkt sich auf die Materialkalkulation aus.",
                 ),
+                "nominal_diameter": (
+                    "Nenndurchmesser",
+                    "Der Nenndurchmesser beeinflusst die Bauteilwahl und Kalkulation.",
+                ),
                 "conflicting_specification": (
                     "Widersprüchliche Spezifikation",
                     "Die Ausführung kann den Material- oder Arbeitsaufwand ändern.",
