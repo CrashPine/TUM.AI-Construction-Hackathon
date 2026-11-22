@@ -123,7 +123,7 @@ def test_limited_budget_spans_the_document(monkeypatch: pytest.MonkeyPatch) -> N
     assert calls == [windows[0], windows[-1]]
     assert not findings
     assert warnings
-    assert coverage.startswith("2/6")
+    assert coverage.startswith("2/2")
     assert "1 (alle Textzeilen übermittelt), 2 (teilweise abgedeckt)" in coverage
     assert "3 (ohne extrahierbaren Text), 4 (nicht abgedeckt)" in coverage
     assert "5 (alle Textzeilen übermittelt)" in coverage
@@ -184,4 +184,101 @@ def test_related_distant_windows_are_compared_before_local_sampling(
     findings, _, coverage = semantic.semantic_review(pages, config)
     assert calls == [([1], [4]), ([3], [])]
     assert len(findings) == 1
-    assert coverage.startswith("2/10")
+    assert coverage.startswith("2/2")
+
+
+def test_full_document_covers_hem_with_one_cross_comparison(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run every local window of the actual 136-page estimate before cross-window work.
+
+    :param monkeypatch: replace Ollama with an empty valid response.
+    """
+    path = Path(__file__).resolve().parents[1] / "data/raw/HEM2301-2_Gesamt-LV.pdf"
+    with pymupdf.open(path) as document:
+        pages, _ = extract(document)
+    reviewed = set()
+    requests = []
+
+    def respond(config: semantic.SemanticConfig, payload: dict) -> list:
+        """Record every submitted physical page.
+
+        :param config: inference settings.
+        :param payload: one or two source windows.
+        :returns: an empty findings list.
+        """
+        assert config.full_document
+        requests.append(bool(payload["right"]))
+        reviewed.update(line["page"] for side in ("left", "right") for line in payload[side])
+        return []
+
+    monkeypatch.setattr(semantic, "_request", respond)
+    _, warnings, coverage = semantic.semantic_review(
+        pages, semantic.SemanticConfig("", "test", max_requests=1, full_document=True)
+    )
+    assert reviewed == set(range(1, 137))
+    assert len(requests) == 104 and requests == [False] * 103 + [True]
+    assert "136 (alle Textzeilen" in coverage
+    assert not any("Teil des extrahierten" in warning for warning in warnings)
+
+
+def test_hem_layout_assigns_source_position_numbers() -> None:
+    """Retain source positions for aligned OZ cells without a trailing dot."""
+    path = Path(__file__).resolve().parents[1] / "data/raw/HEM2301-2_Gesamt-LV.pdf"
+    with pymupdf.open(path) as document:
+        pages, _ = extract(document)
+    for page, fragment, position in (
+        (79, "mind. 900 m3/h", "03.02.3"),
+        (104, "DN 125, PN 10", "05.01.46"),
+        (133, "mind. 250 m3/h", "07.01.2"),
+    ):
+        assert next(line.oz for line in pages[page - 1] if fragment in line.text) == position
+
+
+def test_hem_separate_ventilation_positions_are_not_conflicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject differences in independently specified ventilation positions.
+
+    :param monkeypatch: replace Ollama with the known false-positive pattern.
+    """
+    path = Path(__file__).resolve().parents[1] / "data/raw/HEM2301-2_Gesamt-LV.pdf"
+    with pymupdf.open(path) as document:
+        pages, _ = extract(document)
+    chosen = [
+        line
+        for i in (78, 132)
+        for line in pages[i]
+        if line.text.startswith("Querschnitt weiterführende Luftleitung:")
+        or line.text in {"mind. 900 m3/h.", "mind. 250 m3/h."}
+    ]
+    assert len(chosen) == 4
+
+    def respond(config: semantic.SemanticConfig, payload: dict) -> list[dict]:
+        """Propose the two known spurious cross-position findings.
+
+        :param config: requested connection.
+        :param payload: four real citation lines.
+        :returns: correctly quoted but contextually incorrect candidates.
+        """
+        assert config.model == "test"
+        lines = payload["left"]
+        assert len(lines) == 4
+        return [
+            {
+                "left_id": a["id"],
+                "right_id": b["id"],
+                "left_quote": a["text"],
+                "right_quote": b["text"],
+                "status": "conflict",
+                "explanation": "Different values represent different requirements.",
+            }
+            for a in lines[:2]
+            for b in lines[2:]
+            if a["text"].startswith("mind.") == b["text"].startswith("mind.")
+        ]
+
+    monkeypatch.setattr(semantic, "_request", respond)
+    findings, _, summary = semantic.semantic_review([chosen], _CONFIG)
+    assert not findings
+    assert summary.startswith("1/1")

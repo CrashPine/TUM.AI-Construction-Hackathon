@@ -11,3 +11,4 @@ __pycache__/
 
 # Default local review database, including any SQLite sidecar files.
 bidguard-history.sqlite3*
+frontend/node_modules/

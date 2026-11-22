@@ -1,4 +1,4 @@
-# BidGuard AI PDF contradiction review
+# PUManager PDF contradiction review
 
 ## Scope
 

@@ -4,12 +4,15 @@ import argparse
 import re
 import sqlite3
 from collections.abc import Callable
+from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
+from socketserver import ThreadingMixIn
 from tempfile import TemporaryDirectory
+from threading import Lock
 from urllib.parse import parse_qs
 from uuid import uuid4
-from wsgiref.simple_server import make_server
+from wsgiref.simple_server import WSGIServer, make_server
 
 from . import what_if
 from .attachment_scope import compare_attachment
@@ -34,6 +37,37 @@ from .xlsx_lv import read_xlsx
 
 _RUN = re.compile(r"/review/([a-f0-9]{32})(?:/(pdf|log|report|resume|attachment|whatif))?")
 _MAX_UPLOAD = 32 * 1024 * 1024
+_WORKSPACE_ASSETS = {
+    "/assets/workspace.js": ("workspace.js", "text/javascript; charset=utf-8"),
+    "/assets/workspace.css": ("workspace.css", "text/css; charset=utf-8"),
+}
+
+
+class _LocalServer(ThreadingMixIn, WSGIServer):
+    """Keep read-only pages responsive while a model request is running."""
+
+
+def _serialize_writes(application: Callable) -> Callable:
+    """Run one mutation at a time, protecting PDF operations and review state.
+
+    :param application: local review application.
+    :returns: an application that serializes POST requests.
+    """
+    lock = Lock()
+
+    def dispatch(env: dict, start_response: Callable) -> list[bytes]:
+        """Allow navigation and exports during an upload or model call.
+
+        :param env: WSGI request environment.
+        :param start_response: callback for status and headers.
+        :returns: response chunks from the review application.
+        """
+        if env["REQUEST_METHOD"] == "POST":
+            with lock:
+                return application(env, start_response)
+        return application(env, start_response)
+
+    return dispatch
 
 
 def _read_body(env: dict, limit: int, *, media_type: str) -> bytes:
@@ -301,7 +335,10 @@ def make_app(
         body: str | bytes = ""
 
         try:
-            if method == "GET" and path == "/":
+            if method == "GET" and path in _WORKSPACE_ASSETS:
+                asset, content_type = _WORKSPACE_ASSETS[path]
+                body = (Path(__file__).with_name("static") / asset).read_bytes()
+            elif method == "GET" and path == "/":
                 body = upload_view(
                     semantic.model if semantic else None, history=history_db is not None
                 )
@@ -309,6 +346,8 @@ def make_app(
                 name = query.get("name", ["upload.pdf"])[0][:200]
                 identifier = uuid4().hex
                 selected = semantic if query.get("semantic") == ["1"] else None
+                if selected and query.get("coverage") == ["full"]:
+                    selected = replace(selected, full_document=True)
                 trade = query.get("trade", [""])[0].strip()[:120]
                 templates = model_patterns(history_db, trade) if history_db else []
                 result, original = _analyse(env, name, directory / identifier, selected, templates)
@@ -473,8 +512,10 @@ def main() -> None:
         application = make_app(
             Path(temporary), history_db=args.history_db, semantic=semantic, dataset=dataset
         )
-        with make_server("127.0.0.1", args.port, application) as server:
-            print(f"BidGuard AI · http://127.0.0.1:{server.server_port}", flush=True)
+        with make_server(
+            "127.0.0.1", args.port, _serialize_writes(application), server_class=_LocalServer
+        ) as server:
+            print(f"PUManager · http://127.0.0.1:{server.server_port}", flush=True)
             try:
                 server.serve_forever()
             except KeyboardInterrupt:

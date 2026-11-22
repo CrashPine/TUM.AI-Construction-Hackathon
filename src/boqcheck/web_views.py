@@ -1,5 +1,6 @@
 """Server-rendered German views for the local review workflow."""
 
+import json
 from html import escape
 
 from . import what_if
@@ -38,19 +39,19 @@ _HISTORY_FIELDS = """
 """
 
 _STYLE = """
-:root{font:16px/1.55 system-ui,sans-serif;color:#202620;background:#f4f6f3}
+:root{font:16px/1.55 system-ui,sans-serif;color:#171717;background:#f4f3ef}
 body{margin:0}main{max-width:54rem;padding:2rem 1.25rem;margin:auto}
 h1,h2,h3{line-height:1.2} h1{margin-top:.4rem} header{margin-bottom:2rem}
-a{color:#215438} nav{display:flex;flex-wrap:wrap;gap:.6rem 1rem}
-article{background:white;border:1px solid #d5ddd5;border-radius:.55rem;padding:1rem 1.25rem;
-margin:1rem 0}blockquote{margin:.3rem 0 1rem;padding:.4rem .85rem;border-left:4px solid #d5a62e;
-background:#fbf7eb}label{display:block;font-weight:600;margin:.7rem 0 .25rem}
+a{color:#171717} nav{display:flex;flex-wrap:wrap;gap:.6rem 1rem}
+article{background:white;border:1px solid #dedbd0;border-radius:.55rem;padding:1rem 1.25rem;
+margin:1rem 0}blockquote{margin:.3rem 0 1rem;padding:.4rem .85rem;border-left:4px solid #FFD400;
+background:#fffae5}label{display:block;font-weight:600;margin:.7rem 0 .25rem}
 textarea{width:100%;box-sizing:border-box}button,select,textarea,input{font:inherit}
-button{cursor:pointer;background:#215438;color:white;border:0;border-radius:.3rem;
+button{cursor:pointer;background:#FFD400;color:#171717;border:0;border-radius:.3rem;
 padding:.5rem .9rem}button:disabled{opacity:.6;cursor:wait}
-.badge{font-size:.9rem;color:#465347}.actions{margin-top:1rem}.question{white-space:pre-wrap}
+.badge{font-size:.9rem;color:#58554a}.actions{margin-top:1rem}.question{white-space:pre-wrap}
 .table{overflow:auto}table{border-collapse:collapse;width:100%}
-td,th{padding:.55rem;text-align:left;border-bottom:1px solid #d5ddd5}td{vertical-align:top}
+td,th{padding:.55rem;text-align:left;border-bottom:1px solid #dedbd0}td{vertical-align:top}
 tr:target{background:#fbf2cf}details p{white-space:pre-wrap}
 @page{size:A4;margin:16mm}
 @media print{nav{display:none} :root,article{background:white;color:black}
@@ -85,18 +86,31 @@ form.addEventListener('submit', async (event) => {
   const status = document.querySelector('#progress');
   const button = form.querySelector('button');
   button.disabled = true;
-  status.textContent = 'Datei wird geprüft …';
+  const started = Date.now();
+  let stage = model?.checked && !model.disabled
+    ? 'Datei und lokales Modell werden geprüft'
+    : 'Datei wird geprüft';
+  const updateStatus = () => {
+    status.textContent = stage + ' … ' + Math.floor((Date.now() - started) / 1000) + ' s';
+  };
+  updateStatus();
+  const timer = setInterval(updateStatus, 1000);
   try {
     const query = new URLSearchParams({name: file.name});
     const trade = document.querySelector('#history-trade')?.value.trim();
     if (trade) query.set('trade', trade);
-    if (model?.checked && !model.disabled) query.set('semantic', '1');
+    if (model?.checked && !model.disabled) {
+      query.set('semantic', '1');
+      query.set('coverage', document.querySelector('#coverage').value);
+    }
     const response = await fetch('/upload?' + query, {
       method: 'POST', headers: {'Content-Type': type}, body: file
     });
     if (!response.ok) throw new Error(await response.text());
     const attachment = document.querySelector('#attachment').files[0];
     if (attachment) {
+      stage = 'Anlage wird geprüft';
+      updateStatus();
       const params = new URLSearchParams({name: attachment.name});
       const added = await fetch(response.url + '/attachment?' + params, {
         method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: attachment
@@ -115,26 +129,47 @@ form.addEventListener('submit', async (event) => {
   } catch (error) {
     status.textContent = 'Prüfung fehlgeschlagen. ' + error.message;
     button.disabled = false;
+  } finally {
+    clearInterval(timer);
   }
 });
 </script>
 """
 
 
-def _page(title: str, content: str) -> str:
+def _page(title: str, content: str, *, workspace: bool = True) -> str:
     """Wrap a rendered view in a single HTML document.
 
     :param title: visible title and browser tab label.
     :param content: already safely rendered HTML.
+    :param workspace: load interactive assets for the web workspace.
     :returns: complete UTF-8 HTML document.
     """
+    assets = (
+        '<link rel="stylesheet" href="/assets/workspace.css">'
+        '<script defer src="/assets/workspace.js"></script>'
+        if workspace
+        else ""
+    )
     return (
         f'<!doctype html><html lang="de"><head><meta charset="utf-8">'
         f'<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f"<title>{escape(title)} | BidGuard AI</title><style>{_STYLE}</style></head>"
-        f'<body><main><header><div class="badge">BidGuard AI</div>'
+        f"<title>{escape(title)} | PUManager</title><style>{_STYLE}</style>{assets}</head>"
+        f'<body><main><header><div class="badge">PUManager</div>'
         f"<h1>{escape(title)}</h1></header>{content}</main></body></html>"
     )
+
+
+def _workspace(kind: str, props: dict, fallback: str = "") -> str:
+    """Mount React on an interactive page while retaining the HTML fallback.
+
+    :param kind: React component entry point.
+    :param props: data passed to the component.
+    :param fallback: page content before the component loads.
+    :returns: HTML mount with attribute-escaped JSON properties.
+    """
+    data = escape(json.dumps(props))
+    return f'<div data-react-workspace="{kind}" data-props="{data}">{fallback}</div>'
 
 
 def upload_view(model: str | None = None, *, history: bool = False) -> str:
@@ -147,6 +182,11 @@ def upload_view(model: str | None = None, *, history: bool = False) -> str:
     option = (
         f'<label><input type="checkbox" id="semantic" disabled> '
         f"Lokales Modell für PDF verwenden ({escape(model)})</label>"
+        '<label for="coverage">Umfang der Modellprüfung</label>'
+        '<select id="coverage"><option value="full">Alle Textabschnitte</option>'
+        '<option value="quick">Stichprobe (schnell)</option></select>'
+        '<p class="badge">Bei langen PDFs kann die Prüfung lange dauern. Der Bericht '
+        "zeigt, welche Vergleiche abgeschlossen wurden.</p>"
         if model
         else ""
     )
@@ -157,7 +197,7 @@ def upload_view(model: str | None = None, *, history: bool = False) -> str:
         else ""
     )
     body = _UPLOAD.replace("<!--model-option-->", option).replace("<!--history-option-->", trade)
-    return _page("LV prüfen", body)
+    return _page("LV prüfen", _workspace("upload", {"model": model, "history": history}, body))
 
 
 def _source(base: str, source: dict, report: bool) -> str:
@@ -564,6 +604,20 @@ def review_view(
     content.append(_history_comparison(result, report))
     if not findings:
         content.append("<p>Keine aktiven Befunde.</p>")
+        if result.get("semantic_model"):
+            content.append(
+                "<p>Das Ergebnis gilt für die ausgeführten Vergleiche. "
+                "Nicht abgedeckte Abschnitte bleiben ungeprüft.</p>"
+            )
+    if not report:
+        content.append(
+            _workspace(
+                "review",
+                {
+                    "findings": [{"id": f["id"], "status": f["review_status"]} for f in findings],
+                },
+            )
+        )
     if findings and not report:
         content.append(f'<form method="post" action="{base}">')
     attachment = result.get("attachment")
@@ -673,4 +727,6 @@ def review_view(
                 f"<pre>{escape(raw)}</pre></details>"
                 for i, label, raw in records
             )
-    return _page("Risikobericht" if report else "Befunde prüfen", "".join(content))
+    return _page(
+        "Risikobericht" if report else "Befunde prüfen", "".join(content), workspace=not report
+    )

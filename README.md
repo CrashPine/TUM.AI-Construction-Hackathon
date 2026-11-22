@@ -1,277 +1,116 @@
-# AI Estimation and Bidding Assistant for Bills of Quantities
+# PUManager
 
-Team repository for **Challenge A: AI-Powered Cost Estimation and BoQ Analysis** at the TUM.AI
-Construction Hackathon.
+**Find tender risks before they become bid costs.**
 
-We build a prototype that reads long bills of quantities (BoQs; German *Leistungsverzeichnis*, LV),
-finds errors and risks in them and gives the estimator a risk report before the bid.
+PUManager is a local review workspace for German bills of quantities (*Leistungsverzeichnisse*, or LVs). An estimator uploads an LV, reviews findings against the original sources, edits a German clarification question (*Bieterfrage*), and exports a report. Each finding shows where to look and why it matters for the bid.
 
-**Status:** `boqcheck` reviews supported PDF and GAEB files locally, with source-backed findings
-and a standalone HTML risk report.
-[AGENTS.md](AGENTS.md) has the commands and the rules for coding agents.
+Built for **Challenge A — AI-Powered Cost Estimation and BoQ Analysis**, TUM.AI Construction Hackathon.
 
-## Local PDF contradiction review
+![PUManager upload workspace with PDF, GAEB, XLSX and optional DOCX input](docs/assets/pumanager-workspace.png)
 
-The PDF checks also flag explicitly open specifications and compensation terms when the
-surrounding LV does not resolve them. Findings include the relevant OZ and a German
-Bieterfrage. A missing separate line item does not trigger this check.
+[Run locally](#run-locally) · [90-second judge walkthrough](#90-second-judge-walkthrough) · [Try more examples](#try-more-examples) · [Verification](#verification)
 
-Start the web prototype without a model:
+## Run locally
 
-```powershell
+Install Git and **uv**. uv provisions Python 3.12 and installs the locked dependencies. The React bundle is included, so you only need Node.js to rebuild the frontend. [Install uv](https://docs.astral.sh/uv/getting-started/installation/)
+
+```sh
+git clone https://github.com/CrashPine/TUM.AI-Construction-Hackathon.git
+cd TUM.AI-Construction-Hackathon
 uv sync --locked
-uv run python -m boqcheck.web
+uv run --locked python -m boqcheck.web
 ```
 
-Open `http://127.0.0.1:8000` and upload `data/raw/LV_09_Porenbetondach.pdf`. The PDF review shows
-both excerpts and links to the annotated source. Set the review status, edit the Bieterfrage, and
-save the changes before opening the risk report. The report includes a standalone HTML download
-and a print action which opens the browser's Save as PDF dialog.
+Open **[http://127.0.0.1:8000](http://127.0.0.1:8000/)** and keep the terminal open. This route runs the deterministic checks and exports without an Ollama installation. If port 8000 is occupied, append `--port 8001` and open that port. On Windows, `.start-bidguard.ps1 -RulesOnly` also starts the rules-only app.
 
-The same upload form accepts GAEB X83 (3.1 or 3.2). It shows normalized positions, structural
-findings and price-check coverage and exports the shared HTML report. GAEB 90 uploads
-(D83, D84 and D86) use the same review and export. Duplicate OZs and price findings cite their
-individual physical records; sums cite their stated total and contributing item records.
-Uncheckable sums are reported separately, and unpriced positions in priced files count as skipped.
-The experimental price check assumes one quantity unit per unit price: position types and price
-bases are not fully recognized, so discrepancies require review. A numbering gap is only a hint,
-not proof of missing work. A price-only D84 displays prices and reports missing quantities.
-An optional DOCX attachment belongs to the uploaded LV. Open its source list,
-select a paragraph or table cell for a finding, and save the review to include that excerpt
-in the HTML report. For PDFs, an attached DOCX also supports automatic comparison of explicitly labelled fields.
-Use the same OZ and component title, followed by a property such as a thickness in the next
-paragraph. The web review and HTML export show the matched sources. Other excerpts can be cited manually. XLSX uses exact first-row headers `OZ`, `Kurztext`, `Menge`, `ME`. Optional price columns are
-`EP`, `Preisbasis` and `Gesamtbetrag`. Store OZ as text to preserve leading zeros. Use values
-in the numeric columns, as formulas are reported as unreadable numeric fields. Unmapped sheets
-are reported and skipped. Findings cite the original sheet and row.
+### Enable local AI
 
-To make local Ollama available for PDF uploads, start the server with:
+Start Ollama and use `ollama list` to get the exact name of an **installed local chat model**. The team verified `bonsai-2:27b`. The model weights are separate from this repository. [Ollama for Windows](https://docs.ollama.com/windows)
 
-```powershell
-uv run python -m boqcheck.web --endpoint http://127.0.0.1:44445/api/chat --model bonsai-2:27b --timeout 180
+```sh
+uv run --locked python -m boqcheck.web --endpoint http://127.0.0.1:11434/api/chat --model "bonsai-2:27b" --max-requests 1 --timeout 240
 ```
 
-Select the model checkbox on a PDF upload to use it for that run. Without the checkbox the
-existing rules run on their own. The report records model coverage or unavailability.
-The web server defaults to six model comparisons per upload (override with `--max-requests`).
-Add `--spelling` to the web or PDF CLI command to check German spelling within the same model
-budget. To recognize additional trade terms and brands, add `--lexicon PATH` with a UTF-8 list
-containing one accepted word per line. A proposal appears only if its original token is found in
-the cited source and a nearby replacement is supported by the local dictionary or lexicon.
-The reviewer can edit the replacement before exporting the risk report. The source PDF text
-remains intact.
+Replace the model name and port if your installation differs. On Windows, `.start-bidguard.ps1` checks the model and tries port 44445 before 11434. `-OllamaPort` and `-Model` override those settings. Stop the previous server with Ctrl+C before reusing its port.
 
-Review state and generated files are available for the lifetime of the local server. Download
-the report, annotated PDF or log before stopping it. To retain a confirmed PDF rule case,
-select its history checkbox and enter a reviewer identifier before saving. Confirmed cases
-promoted this way persist in `bidguard-history.sqlite3` (override with `--history-db PATH`).
-The next upload reports coverage for saved drawing-scope and aggregate-limit rules.
-Enter the trade on upload to restrict historical matches to cases tagged with that trade and
-untagged cases. With the field blank, all saved rules are considered. Position cues are checked
-against extracted PDF text, and the report explains skipped or inconclusive historical rules.
-To promote a confirmed model finding, also enter a reusable conflict condition and comma-separated
-search phrases. On a new PDF upload with the model enabled, historical conditions use up to half
-the comparison budget (rounded up). A replay finding must cite excerpts from the new PDF.
-The report shows conditions that were deferred when the budget ran out.
-Save any edits and choose **Historische Prüfung fortsetzen** to run the next batch. Deferred
-reviews retain the original PDF, completed comparisons, edits and latest exports in SQLite.
-Keep the private review URL to reopen it after restarting the server with the same history
-database and model. The database contains those documents and should stay local.
+For each PDF, enable **Lokales Modell für PDF verwenden**. Choose **Stichprobe (schnell)** for a bounded run or **Alle Textabschnitte** to send all extracted text windows plus selected cross-window pairs. Long documents can take much longer. The report shows actual coverage and any model failure, and the rule-based findings remain available.
 
-### Command-line review
+## 90-second judge walkthrough
 
-```powershell
-uv sync --locked
-uv run python -m boqcheck.review_pdf "data/raw/LV_09_Porenbetondach.pdf" "runs/roof-review"
+Use **[`LV_09_Porenbetondach.pdf`](data/raw/LV_09_Porenbetondach.pdf)** from `data/raw`. This real four-page roof LV gives a reproducible finding even if Ollama is unavailable.
+
+| Time | What to do | What to look for |
+| --- | --- | --- |
+| 0–15 s | Select the roof PDF and click **Datei prüfen**. Leave the DOCX field empty. | **Klärungsbedarf** on the drawing scope. |
+| 15–35 s | Open the source link **PDF-Seite 1**. | Two yellow highlights and comments. OZ **9.2.3** refers to facade drawings and OZ **9.2.4** describes roof panels. |
+| 35–55 s | Return to the finding, select **Bestätigt**, edit **Bieterfrage**, and click **Änderungen speichern**. | An editable question grounded in the two excerpts. |
+| 55–70 s | Open **Risikobericht** and choose **HTML herunterladen** or **Drucken / Als PDF speichern**. | The downloaded report contains the saved question. **Befundprotokoll** and **Annotiertes PDF** are separate exports. |
+| 70–90 s | Switch to the prepared Ollama result described below. | A second example with the model’s contribution and coverage visible. |
+
+**Suggested Bieterfrage**
+
+> Sind Zeichnungen für die Dachplatten, die Fassade oder beide Bauteile einzukalkulieren?
+
+**Prepare the AI segment before recording.** Upload **[`LV-Schachtbauwerk.pdf`](data/raw/LV-Schachtbauwerk.pdf)**, enable Ollama, select **Stichprobe (schnell)**, and run the review. The built-in rule selects the 8 mm and 15 mm clauses on PDF pages **2 and 5**. When the model flags the same evidence, the report displays **Modellbefund an denselben Quellen**. The team verified this result with local Ollama. Use the completed report during a recording, since inference speed and responses can vary. [Detailed demo and acceptance walkthrough](docs/estimator-demo.md)
+
+## What PUManager checks
+
+| Capability | Evidence shown to the estimator |
+| --- | --- |
+| Requirements and scope | Page and position anchors for incompatible specifications, unresolved scope, and selected cross-document differences. |
+| Quantities and totals | Source cells or paragraphs for invalid positions, duplicates and arithmetic findings. Supported checks include unit-price bases, selected subtotal layouts, and comparable units. |
+| Review and export | Confirm, dismiss or leave a finding open. Preserve revised Bieterfragen in a self-contained HTML report and browser printout. |
+| Local model review | Ollama compares selected source excerpts and proposes findings. PUManager validates both quoted passages and reports what was covered. |
+| Learning from past reviews | Confirmed findings can be promoted to SQLite for replay on later LVs. A separately configured dataset supports historical quantity and price comparisons. |
+
+### Try more examples
+
+| File or workflow | Expected result |
+| --- | --- |
+| `HEM2301-2_Gesamt-LV.pdf` | Two rule-based diameter discrepancies (**DN 125 / DN 100**) on file pages **96** and **104**. Use rules-only for a fast check on this 136-page LV. |
+| `GAEB-[PROJEKT_004].X83` | 50 positions. An unpriced request does not produce a missing-price error. |
+| `Angebot AN24-0305.D84` | 274 checked position totals. Try **Was-wäre-wenn-Rechnung** to compare a hypothetical quantity or price with the source. |
+| XLSX | Create a sheet with headings `OZ`, `Kurztext`, `Menge`, `ME`, `EP`, `Preisbasis`, `Gesamtbetrag`. Add one row with `01.01.0010` stored as text, `Dachplatte`, `10`, `m2`, `2`, `1`, `19.99`. The expected total is 20.00 and the finding cites row 2. Use values in numeric cells. |
+| DOCX attachment | Add `LV-Positionen.docx` in the attachment field to inspect paragraph references. Automatic comparison needs matching position and component context. |
+
+## How it works
+
+```mermaid
+flowchart LR
+    A["PDF · GAEB · XLSX<br/>Optional DOCX"] --> B["Extract positions and source anchors"]
+    B --> C["Deterministic checks"]
+    B --> D["Optional loopback Ollama"]
+    C --> E["React review workspace"]
+    D --> F["Validate cited excerpts"] --> E
+    E --> G["HTML report · Marked PDF · Findings log"]
+    E --> H["Optional SQLite history"]
 ```
 
-Use a new output directory for each run. The command prints a JSON manifest with the status,
-candidate count, coverage warnings and paths to the annotated source PDF and Markdown log.
-Agent integrations can call `boqcheck.review_pdf.review_pdf(filename, pdf_bytes, output)` directly.
+Python handles extraction, validation and exports. React provides the upload and review controls. The model connection is local by default, and the optional online spelling lookup is disabled by default. Standard review links are tied to the running server. Download the HTML, PDF and log before restarting. Reviewer edits are reflected in HTML, while the annotated PDF and log capture the original review run.
 
-The baseline checks forward references in drawing positions and differing maximum aggregate
-sizes for Schachtvierungen. Review the resulting candidates before using the proposed
-Bieterfragen. Textless pages are reported as skipped. See the
-[PDF review architecture](docs/pdf-contradiction-review.md) for the data flow and the
-[PDF review checklist](docs/pdf-review-checklist.md) for completed checks and open work.
+## Verification
 
-`tests/test_baseline.py` freezes the rule findings for all 43 supported sample files and checks
-that an unavailable or malformed model keeps them and the export. To rerun the roof and shaft
-cases with a real local model, set `BOQCHECK_BASELINE_ENDPOINT` and `BOQCHECK_BASELINE_MODEL`,
-then run `uv run pytest -s tests/test_baseline.py -k local_model`. That tier prints the model
-findings for comparison; it does not score them.
-
-
-### Semantic review with Ollama
-
-```powershell
-uv run python -m boqcheck.review_pdf "input.pdf" "runs/model-review" `
-  --endpoint http://127.0.0.1:44445/api/chat --model "bonsai-2:27b" --timeout 180
+```sh
+uv run --locked pytest -q
+uv run --locked ruff check src tests
 ```
 
-Agent callers can pass `semantic=SemanticConfig(endpoint, model)` to `review_pdf`.
-The tool submits text excerpts to the configured loopback model. The native Ollama endpoint
-uses JSON output with thinking disabled. Existing OpenAI-compatible loopback chat URLs are also
-supported.
+The default suite covers the included fixtures, source anchors, arithmetic, and upload-to-export scenarios. Real-model tests are opt-in. [CLI, model tests and historical datasets](docs/advanced-review.md)
 
-The comparison budget defaults to 24 requests and can be adjusted with `--max-requests`.
-When related windows share uncommon terms, an OZ or an explicit reference to an OZ, the tool
-reserves up to half the requests for those pairs. It spreads the remaining local checks across
-the document when the budget cannot cover every window.
-The log reports completed comparisons and which physical PDF pages supplied all, some, or none
-of their extracted lines. It preserves deterministic findings when the model is unavailable.
+**Known limits.** Findings are candidates for estimator review. Coverage counts describe the text sent to the model and completed requests. They do not establish exhaustive detection. A full-text scan still selects cross-window pairs rather than reviewing every possible pair. Scanned pages without text are skipped. PDF arithmetic depends on recognized layouts, and GAEB 90 price checks have documented assumptions. Historical anomaly tests include labelled synthetic data, and benchmarking across independent projects remains open. [Delivery status and open items](docs/hackathon-checklist.md)
 
-## GAEB X83 validation
+## Develop
 
-```powershell
-uv run python -m boqcheck.gaeb_checks "data/raw/GAEB-[PROJEKT_004].X83"
+```sh
+npm --prefix frontend ci
+npm --prefix frontend run build
 ```
 
-The JSON report lists importer warnings and position findings with their OZ and item number.
-An X83 without prices is valid for this check. If a file explicitly supplies `UP`, `PriceBasis`
-and `IT` as item extensions, the checker compares the rounded total for standard unit-priced
-items with a known quantity and unit. It skips totals with missing operands or explicit discounts.
-The official X83 and X84 schemas are available from
-[GAEB](https://www.gaeb.de/de/service/downloads/gaeb-datenaustausch/).
+| Path | Contents |
+| --- | --- |
+| `frontend/` | React and CSS sources |
+| `src/boqcheck/` | Importers, checks, web server and exports |
+| `data/raw/` | Included tender samples |
+| `tests/` | Parser, regression and acceptance tests |
 
-## Challenge
-
-**Problem.** Bills of quantities often contain thousands of line items, multiple cost groups and
-cross-trade dependencies. Companies lack the time and staff to review them in detail, identify risks
-and learn from past projects. Typos, calculation errors and overlooked change-order potential can
-have major financial consequences.
-
-**Objective.** A prototype for intelligent BoQ analysis:
-
-- Import and parse long BoQs (PDF, GAEB, Excel).
-- **Error detection (priority):** missing items, unclear descriptions, contradictions, typos.
-- Risk assessment: flag imprecise scope descriptions and unusual quantities.
-- Detect change-order potential and likely disputes during execution.
-- Optional: suggest unit prices or markups from historical project data.
-
-**Milestones:**
-
-1. BoQ parsing and structured data extraction
-2. Error detection and plausibility checks
-3. Risk scoring and change-order detection
-4. Integration of historical project data (optional)
-5. What-if analyses (material prices, alternatives)
-
-**Deliverables:**
-
-- A demo of a web app or assistant tool with upload and risk report.
-- A pitch from an estimator's perspective: how does the prototype change the bidding process?
-
-## Data
-
-[`data/raw/`](data/raw/) holds the 44 files that the organizers shared (25 MB, German, anonymized),
-unchanged. [`data/README.md`](data/README.md) describes each file and which files hold the same BoQ.
-
-| Format | Files | Content |
-|---|---:|---|
-| GAEB DA XML (`.X83`) | 4 | bid requests (phase 83): sections, items, quantities, units, short and long texts; no prices |
-| GAEB 90 (`.D83`, `.D84`, `.D86`) | 5 | fixed-width BoQ files: 1 bid request (83), 2 bids (84), 2 contract awards (86); the 84 and 86 files have prices |
-| PDF | 34 | 27 trade BoQs of one building project (`LV_00` to `LV_23`), 2 BoQs with prices, 5 other BoQs and tender packages without prices |
-| DOCX | 1 | 40 BoQ positions grouped by work package |
-
-The brief also names Excel BoQs, historical project data (planned vs. actual costs, change orders),
-unit price catalogs and real examples of faulty BoQ items. On 2026-11-21 the shared folder had none
-of these as separate files.
-
-## Repository layout
-
-| Path | Content |
-|---|---|
-| `AGENTS.md` | instructions for coding agents: rules and notes on the file formats |
-| `README.md` | this overview |
-| `data/README.md` | data inventory |
-| `data/raw/` | the organizers' files, read-only |
-| `src/boqcheck/` | Python package: BoQ data model and parsers |
-| `tests/` | pytest tests |
-| `docs/research/` | research reports: [BoQ error checks and price sources](docs/research/2026-11-21-boq-errors-and-pricing.md) |
-| `pyproject.toml`, `uv.lock` | project settings and locked dev tool versions |
-
-## How we work
-
-- Branch from `main` (`feature/`, `fix/`, `docs/`, `chore/`, `data/`) and open a pull request.
-- Keep pull requests small (about 400 changed lines). Commit each finished functionality with its tests.
-- The repository is public. Never commit API keys, tokens or `.env` files.
-
-[AGENTS.md](AGENTS.md) has the full rules.
-
-## Glossary
-
-Short explanations from general domain knowledge, not checked against a source. Check a term
-before you build an error rule on it. Only the phase meanings were compared with the data.
-
-| German term | Meaning |
-|---|---|
-| LV, Leistungsverzeichnis | bill of quantities (BoQ) |
-| OZ, Ordnungszahl | item number, hierarchical (for example `01.02.0030`) |
-| Los, Titel, Bereich | levels of the BoQ structure; a Los (lot) can be awarded on its own |
-| Position | line item |
-| Kurztext, Langtext | short description, full description |
-| Menge, ME (Mengeneinheit) | quantity, unit: `m`, `m²`, `m³`, `St` (piece), `psch` (lump sum), `Mt` (month) |
-| EP (Einheitspreis), GP (Gesamtpreis, Gesamtbetrag) | unit price, line total: GP = Menge × EP |
-| Pauschal (psch) | lump sum |
-| Bedarfsposition, Eventualposition | provisional item: paid only if the client orders it |
-| Wahlposition, Alternativposition | alternative item: priced instead of a base item (Grundposition) |
-| Zulage | surcharge item on top of another item |
-| Vorbemerkungen | preliminary notes that apply to many items |
-| Nachtrag | change order: extra payment for changed or additional work |
-| Aufmaß | measurement of the work done |
-| Anfrage, Angebot, Auftrag | request for bids, bid, contract award |
-| VOB/A, VOB/B, VOB/C | German construction rules: award procedure, contract terms, technical standards (ATV, DIN 18299 ff.) |
-| VHB Bayern | standard tender forms of Bavarian public construction; forms 211 and 214.H appear in two PDFs |
-| STLB-Bau | standard text library for BoQ items |
-| GAEB | German standard for BoQ data exchange; formats include GAEB 90 (fixed-width text) and GAEB DA XML |
-| Phase 83, 84, 86 | GAEB exchange phase: bid request, bid, contract award |
-
-## Historical comparison demo
-
-Run `uv run python -m boqcheck.web --historical-dataset history.json` and upload
-the XLSX named in the dataset. The JSON has `filename`, `sha256` (of the exact
-XLSX bytes), `synthetic`, `current` (object keyed by OZ), and `peers` (array).
-Each observation requires `project`, `source`, `trade`, `scope`, and `unit`.
-Pass `scale` and `scale_unit` for quantity comparisons, and `currency`,
-`price_type`, `market`, and `price_period` for price comparisons. Peer rows
-also supply `quantity`, `price` and `price_basis` as applicable. The current
-quantity, price and price basis come from the XLSX. Quantities are compared
-per `scale` and `scale_unit`, prices per `price_basis`. Prices are compared only
-with peers of the same trade, scope, unit, currency, `price_type`, market and
-`price_period`; they are never indexed or adjusted to another date, and the report
-says that the reference is not a market quote. Without a current price or price
-basis the price comparison is unavailable. A reference range needs
-at least `min_projects` distinct comparable projects (integer of at least 2,
-default 3); with fewer the report shows insufficient evidence. A value is
-flagged as unusual when it lies outside the peer range and deviates from the
-median by at least `deviation_threshold` (positive number, default 0.30). The
-report states both settings, the deviation and the peer sources. Embedding
-similarity only selects peers; it never decides an anomaly. `price_type` must be
-`net` or `gross`. A dataset with `synthetic` false needs a nonempty top-level
-`authorization` naming its usage basis; the report shows it as declared, not
-verified. Identical rows for the same project and source load once; differing
-rows are rejected. For each comparison the report lists missing current fields
-and how many peers were excluded as the same project, duplicates, without
-metadata or on another basis. See
-`test_historical_comparison_export` in `tests/test_web.py` for a synthetic example.
-For semantic peer selection, add a top-level `embedding_model` naming an installed
-Ollama embedding model and a `description` for each peer. Set `embedding_port`
-(default 11434) and `similarity` (default 0.75) if needed. Requests stay on loopback.
-Only peers with the same trade, scope and unit enter the similarity search;
-the report counts the ones it gated out. Embeddings are computed per report, with
-no stored index. Each comparison states its retrieval provenance: model, threshold,
-selected/candidate counts, or why retrieval was unavailable (model not installed,
-HTTP error, service unreachable, invalid answer). Without `embedding_model` it says
-that peers were chosen by metadata only.
-Instead of entering peer numbers in JSON, add a top-level `projects` array.
-Each entry contains `project` (independent project ID), `workbook` (relative XLSX
-path inside the manifest directory), and `positions` (object keyed by historical OZ).
-Use `defaults` for common metadata and per-position objects for overrides. Numbers,
-units and descriptions come from the workbook. Reports cite the workbook, sheet
-and physical row. Inline `peers` may still be supplied independently.
-For a project-level shortlist before position matching, set `current_profile`
-to a project summary and `project_profiles` to an object mapping historical
-project IDs to their summaries. This requires `embedding_model`. Only projects
-with a supplied profile can enter the shortlist. The report shows coverage of
-both search stages, including how many projects had no profile.
+[Data inventory](data/README.md) · [Review architecture](docs/pdf-contradiction-review.md) · [Hackathon implementation prompt](BidGuard-AI-hackathon-prompt)

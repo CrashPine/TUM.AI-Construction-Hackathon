@@ -28,6 +28,14 @@ _RULE = "Regelprüfung"
 # Signature: (rule or method, category, anchors); anchors are (page, OZ) for PDF sources and
 # the GAEB 90 line of the reported total for price findings. Files not listed have none.
 _FROZEN = {
+    "HEM2301-2_Gesamt-LV.pdf": [
+        ("nominal_diameter", "Nenndurchmesser", ((96, "05.01.4"), (96, "05.01.4"))),
+        ("nominal_diameter", "Nenndurchmesser", ((104, "05.01.46"), (104, "05.01.46"))),
+    ],
+    "8209.003_Leistungsverzeichnis_leer.X83": [
+        ("nominal_diameter", "Nenndurchmesser", ("05.01.0004", "05.01.0004")),
+        ("nominal_diameter", "Nenndurchmesser", ("05.01.0046", "05.01.0046")),
+    ],
     "LV-Schachtbauwerk.pdf": [
         ("aggregate_limit", "Materialanforderung", ((2, None), (5, "5.2.20"))),
     ],
@@ -63,6 +71,8 @@ def _signature(finding: dict) -> tuple:
     sources = finding["sources"]
     if "page" in sources[0]:
         anchors = tuple((source["page"], source.get("oz")) for source in sources)
+    elif "position" in sources[0]:
+        anchors = tuple(source["oz"] for source in sources)
     else:
         anchors = (sources[0]["record"],)
     return (finding.get("rule") or finding["method"], finding["category"], anchors)

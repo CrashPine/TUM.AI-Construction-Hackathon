@@ -36,7 +36,7 @@ def annotate(page: pymupdf.Page, passage: tuple[Line, ...], identifier: str, com
 
     highlight = page.add_highlight_annot(quads)
     highlight.set_colors(stroke=(1, 1, 0))
-    highlight.set_info(title="BidGuard AI", subject=identifier, content=comment)
+    highlight.set_info(title="PUManager", subject=identifier, content=comment)
     highlight.update()
     obstacles.extend(quad.rect for quad in quads)
 
@@ -50,7 +50,7 @@ def annotate(page: pymupdf.Page, passage: tuple[Line, ...], identifier: str, com
             ):
                 page.delete_annot(note)
                 continue
-            note.set_info(title="BidGuard AI", subject=identifier)
+            note.set_info(title="PUManager", subject=identifier)
             note.update()
             return 2
     return 1
