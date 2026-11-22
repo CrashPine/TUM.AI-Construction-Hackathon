@@ -1,6 +1,6 @@
-# Roof tender review in 90 seconds
+# PUManager demo in 90 seconds
 
-Run `uv run python -m boqcheck.web` and open `http://127.0.0.1:8000`. Have
+On Windows, run `.\start-bidguard.ps1` and open the loopback URL printed in the terminal. Have
 `data/raw/LV_09_Porenbetondach.pdf` ready in the file picker. This demo runs locally
 with the built-in rules. For a public recording, crop the screen to the finding
 and the two relevant phrases.
@@ -17,6 +17,17 @@ report export. The X83 and scope tests cover two controls: an unpriced request c
 legitimately have empty prices, and explicitly included work should not trigger
 a missing-scope finding.
 
+
+## Optional Ollama segment for a recording
+
+Before recording, upload `data/raw/LV-Schachtbauwerk.pdf` in a separate tab.
+Enable **Lokales Modell für PDF verwenden**, choose **Stichprobe (schnell)**,
+and click **Datei prüfen**. With the launcher default of one comparison, the
+first request checks the existing rule-backed pair on PDF pages 2 and 5.
+Record the completed result if it shows **Modellbefund an denselben Quellen**
+alongside **8 mm** and **15 mm**. Show the reported coverage. Local inference
+can take several minutes, so cut from submission to the completed report.
+Download the HTML report and annotated PDF before restarting the server.
 ## Acceptance walk-through
 
 `test_acceptance_walkthrough` in `tests/test_web.py` replays the demo for each supported
