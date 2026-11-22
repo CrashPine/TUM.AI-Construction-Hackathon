@@ -16,7 +16,15 @@ try {
         try {
             $models = (Invoke-RestMethod "$ollama/api/tags" -TimeoutSec 5).models.name
         } catch {
-            throw "Ollama is not responding at $ollama. Start it, set -OllamaPort, or use -RulesOnly."
+            if ($PSBoundParameters.ContainsKey('OllamaPort')) {
+                throw "Ollama is not responding at $ollama. Check -OllamaPort or use -RulesOnly."
+            }
+            $ollama = 'http://127.0.0.1:11434'
+            try {
+                $models = (Invoke-RestMethod "$ollama/api/tags" -TimeoutSec 5).models.name
+            } catch {
+                throw 'Ollama is not responding on ports 44445 or 11434. Start it or use -RulesOnly.'
+            }
         }
         if ($Model -notin $models) {
             throw "Ollama at $ollama does not list $Model. Install it or pass -Model."

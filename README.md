@@ -24,7 +24,12 @@ checkbox on a PDF upload. The default model mode reviews every text window and u
 the configured budget for priority checks and selected cross-window comparisons.
 Choose **Stichprobe (schnell)** to cap the entire run at the configured budget. For a broader,
 slower review pass `-Comparisons 6`. Use `-Port 8001` if port 8000 is occupied,
-`-OllamaPort 11434` for that Ollama instance, or `-RulesOnly` for offline checks.
+`-OllamaPort` to specify an instance, or `-RulesOnly` for offline checks. Without an
+explicit port the launcher tries 44445 and falls back to 11434.
+
+The React workspace is bundled and served locally by Python. To rebuild the UI after editing
+`frontend/workspace.jsx` or `frontend/workspace.css`, run `npm --prefix frontend ci` followed by
+`npm --prefix frontend run build`. The exported HTML report is self-contained.
 
 ## Local PDF contradiction review
 

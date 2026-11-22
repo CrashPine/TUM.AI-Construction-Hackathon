@@ -1,0 +1,14 @@
+{
+  "dependencies": {
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "name": "bidguard-workspace",
+  "scripts": {
+    "build": "esbuild workspace.jsx workspace.css --bundle --minify --outdir=../src/boqcheck/static"
+  },
+  "private": true
+}

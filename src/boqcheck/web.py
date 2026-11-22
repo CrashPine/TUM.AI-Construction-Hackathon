@@ -37,6 +37,10 @@ from .xlsx_lv import read_xlsx
 
 _RUN = re.compile(r"/review/([a-f0-9]{32})(?:/(pdf|log|report|resume|attachment|whatif))?")
 _MAX_UPLOAD = 32 * 1024 * 1024
+_WORKSPACE_ASSETS = {
+    "/assets/workspace.js": ("workspace.js", "text/javascript; charset=utf-8"),
+    "/assets/workspace.css": ("workspace.css", "text/css; charset=utf-8"),
+}
 
 
 class _LocalServer(ThreadingMixIn, WSGIServer):
@@ -331,7 +335,10 @@ def make_app(
         body: str | bytes = ""
 
         try:
-            if method == "GET" and path == "/":
+            if method == "GET" and path in _WORKSPACE_ASSETS:
+                asset, content_type = _WORKSPACE_ASSETS[path]
+                body = (Path(__file__).with_name("static") / asset).read_bytes()
+            elif method == "GET" and path == "/":
                 body = upload_view(
                     semantic.model if semantic else None, history=history_db is not None
                 )

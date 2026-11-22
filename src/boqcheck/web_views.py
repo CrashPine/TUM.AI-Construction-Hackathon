@@ -1,5 +1,6 @@
 """Server-rendered German views for the local review workflow."""
 
+import json
 from html import escape
 
 from . import what_if
@@ -136,20 +137,39 @@ form.addEventListener('submit', async (event) => {
 """
 
 
-def _page(title: str, content: str) -> str:
+def _page(title: str, content: str, *, workspace: bool = True) -> str:
     """Wrap a rendered view in a single HTML document.
 
     :param title: visible title and browser tab label.
     :param content: already safely rendered HTML.
+    :param workspace: load interactive assets for the web workspace.
     :returns: complete UTF-8 HTML document.
     """
+    assets = (
+        '<link rel="stylesheet" href="/assets/workspace.css">'
+        '<script defer src="/assets/workspace.js"></script>'
+        if workspace
+        else ""
+    )
     return (
         f'<!doctype html><html lang="de"><head><meta charset="utf-8">'
         f'<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f"<title>{escape(title)} | BidGuard AI</title><style>{_STYLE}</style></head>"
+        f"<title>{escape(title)} | BidGuard AI</title><style>{_STYLE}</style>{assets}</head>"
         f'<body><main><header><div class="badge">BidGuard AI</div>'
         f"<h1>{escape(title)}</h1></header>{content}</main></body></html>"
     )
+
+
+def _workspace(kind: str, props: dict, fallback: str = "") -> str:
+    """Mount React on an interactive page while retaining the HTML fallback.
+
+    :param kind: React component entry point.
+    :param props: data passed to the component.
+    :param fallback: page content before the component loads.
+    :returns: HTML mount with attribute-escaped JSON properties.
+    """
+    data = escape(json.dumps(props))
+    return f'<div data-react-workspace="{kind}" data-props="{data}">{fallback}</div>'
 
 
 def upload_view(model: str | None = None, *, history: bool = False) -> str:
@@ -177,7 +197,7 @@ def upload_view(model: str | None = None, *, history: bool = False) -> str:
         else ""
     )
     body = _UPLOAD.replace("<!--model-option-->", option).replace("<!--history-option-->", trade)
-    return _page("LV prüfen", body)
+    return _page("LV prüfen", _workspace("upload", {"model": model, "history": history}, body))
 
 
 def _finding(base: str, finding: dict, report: bool, history: bool) -> str:
@@ -582,6 +602,15 @@ def review_view(
                 "<p>Das Ergebnis gilt für die ausgeführten Vergleiche. "
                 "Nicht abgedeckte Abschnitte bleiben ungeprüft.</p>"
             )
+    if not report:
+        content.append(
+            _workspace(
+                "review",
+                {
+                    "findings": [{"id": f["id"], "status": f["review_status"]} for f in findings],
+                },
+            )
+        )
     if findings and not report:
         content.append(f'<form method="post" action="{base}">')
     attachment = result.get("attachment")
@@ -679,4 +708,6 @@ def review_view(
                 f"<pre>{escape(raw)}</pre></details>"
                 for i, label, raw in records
             )
-    return _page("Risikobericht" if report else "Befunde prüfen", "".join(content))
+    return _page(
+        "Risikobericht" if report else "Befunde prüfen", "".join(content), workspace=not report
+    )
