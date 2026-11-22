@@ -1,6 +1,6 @@
 # PUManager demo in 90 seconds
 
-On Windows, run `.\start-bidguard.ps1` and open the loopback URL printed in the terminal. Have
+On Windows, run `.\start-bidguard.ps1 -RulesOnly` and open the loopback URL printed in the terminal. Have
 `data/raw/LV_09_Porenbetondach.pdf` ready in the file picker. This demo runs locally
 with the built-in rules. For a public recording, crop the screen to the finding
 and the two relevant phrases.
@@ -20,7 +20,9 @@ a missing-scope finding.
 
 ## Optional Ollama segment for a recording
 
-Before recording, upload `data/raw/LV-Schachtbauwerk.pdf` in a separate tab.
+If you plan to show both examples, start the app with `.\start-bidguard.ps1` first.
+Leave the model unchecked for the roof upload. Before recording,
+upload `data/raw/LV-Schachtbauwerk.pdf` in a separate tab.
 Enable **Lokales Modell für PDF verwenden**, choose **Stichprobe (schnell)**,
 and click **Datei prüfen**. With the launcher default of one comparison, the
 first request checks the existing rule-backed pair on PDF pages 2 and 5.
