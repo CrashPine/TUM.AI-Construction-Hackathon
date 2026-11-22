@@ -21,7 +21,7 @@ uv sync --locked
 uv run --locked python -m boqcheck.web
 ```
 
-Open **[http://127.0.0.1:8000](http://127.0.0.1:8000/)** and keep the terminal open. This route runs the deterministic checks and exports without an Ollama installation. If port 8000 is occupied, append `--port 8001` and open that port. On Windows, `.start-bidguard.ps1 -RulesOnly` also starts the rules-only app.
+Open **[http://127.0.0.1:8000](http://127.0.0.1:8000/)** and keep the terminal open. This route runs the deterministic checks and exports without an Ollama installation. If port 8000 is occupied, append `--port 8001` and open that port. On Windows, `.\start-bidguard.ps1 -RulesOnly` also starts the rules-only app.
 
 ### Enable local AI
 
@@ -31,7 +31,7 @@ Start Ollama and use `ollama list` to get the exact name of an **installed local
 uv run --locked python -m boqcheck.web --endpoint http://127.0.0.1:11434/api/chat --model "bonsai-2:27b" --max-requests 1 --timeout 240
 ```
 
-Replace the model name and port if your installation differs. On Windows, `.start-bidguard.ps1` checks the model and tries port 44445 before 11434. `-OllamaPort` and `-Model` override those settings. Stop the previous server with Ctrl+C before reusing its port.
+Replace the model name and port if your installation differs. On Windows, `.\start-bidguard.ps1` checks the model and tries port 44445 before 11434. `-OllamaPort` and `-Model` override those settings. Stop the previous server with Ctrl+C before reusing its port.
 
 For each PDF, enable **Lokales Modell für PDF verwenden**. Choose **Stichprobe (schnell)** for a bounded run or **Alle Textabschnitte** to send all extracted text windows plus selected cross-window pairs. Long documents can take much longer. The report shows actual coverage and any model failure, and the rule-based findings remain available.
 
@@ -41,11 +41,11 @@ Use **[`LV_09_Porenbetondach.pdf`](data/raw/LV_09_Porenbetondach.pdf)** from `da
 
 | Time | What to do | What to look for |
 | --- | --- | --- |
-| 0–15 s | Select the roof PDF and click **Datei prüfen**. Leave the DOCX field empty. | **Klärungsbedarf** on the drawing scope. |
+| 0–15 s | Select the roof PDF and click **Datei prüfen**. Leave the DOCX field empty and the model unchecked. | **Klärungsbedarf** on the drawing scope. |
 | 15–35 s | Open the source link **PDF-Seite 1**. | Two yellow highlights and comments. OZ **9.2.3** refers to facade drawings and OZ **9.2.4** describes roof panels. |
-| 35–55 s | Return to the finding, select **Bestätigt**, edit **Bieterfrage**, and click **Änderungen speichern**. | An editable question grounded in the two excerpts. |
+| 35–55 s | Return to the finding, select **Bestätigt**, edit **Bieterfrage**, and click **Änderungen speichern**. Leave history promotion unchecked. | An editable question grounded in the two excerpts. |
 | 55–70 s | Open **Risikobericht** and choose **HTML herunterladen** or **Drucken / Als PDF speichern**. | The downloaded report contains the saved question. **Befundprotokoll** and **Annotiertes PDF** are separate exports. |
-| 70–90 s | Switch to the prepared Ollama result described below. | A second example with the model’s contribution and coverage visible. |
+| 70–90 s | Optional: switch to the prepared Ollama result described below. | A second example with the model’s contribution and coverage visible. |
 
 **Suggested Bieterfrage**
 
@@ -58,7 +58,7 @@ Use **[`LV_09_Porenbetondach.pdf`](data/raw/LV_09_Porenbetondach.pdf)** from `da
 | Capability | Evidence shown to the estimator |
 | --- | --- |
 | Requirements and scope | Page and position anchors for incompatible specifications, unresolved scope, and selected cross-document differences. |
-| Quantities and totals | Source cells or paragraphs for invalid positions, duplicates and arithmetic findings. Supported checks include unit-price bases, selected subtotal layouts, and comparable units. |
+| Quantities and totals | Source pages, GAEB records or spreadsheet rows for structural and arithmetic findings. Supported checks include unit-price bases, selected subtotal layouts, and comparable units. |
 | Review and export | Confirm, dismiss or leave a finding open. Preserve revised Bieterfragen in a self-contained HTML report and browser printout. |
 | Local model review | Ollama compares selected source excerpts and proposes findings. PUManager validates both quoted passages and reports what was covered. |
 | Learning from past reviews | Confirmed findings can be promoted to SQLite for replay on later LVs. A separately configured dataset supports historical quantity and price comparisons. |
@@ -82,7 +82,8 @@ flowchart LR
     B --> D["Optional loopback Ollama"]
     C --> E["React review workspace"]
     D --> F["Validate cited excerpts"] --> E
-    E --> G["HTML report · Marked PDF · Findings log"]
+    E --> G["HTML report for all supported formats"]
+    E --> I["Annotated copy and findings log for PDF inputs"]
     E --> H["Optional SQLite history"]
 ```
 
