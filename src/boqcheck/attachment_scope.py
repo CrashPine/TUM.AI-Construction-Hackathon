@@ -17,7 +17,16 @@ _HEADING = re.compile(
 # A DOCX heading can end with the unit in brackets ("[Mt.]"), which an LV keeps in its own
 # column. Placeholders such as [FIRMA_096] replace words of the Kurztext, so they stay.
 _UNIT = re.compile(r"\s+\[[^\s\[\]_]+\]$")
-_PROPERTY = re.compile(rf"({'|'.join(_FIELDS)})\s*:\s*(.+?)\.?$", re.I)
+_PROPERTY = re.compile(rf"({'|'.join(_FIELDS)})\s*:\s*(.+?)[.,]?$", re.I)
+# Free text and compound labels ("Wanddicke") also name a field.
+_MENTION = re.compile("|".join(_FIELDS), re.I)
+# Qualifiers, comparisons, alternatives and ranges make a value inexact. The model comparison
+# caps its status on the same markers.
+_AMBIGUOUS = re.compile(
+    r"\b(?:ca|circa|min|mind|mindestens|max|höchstens|bis|über|oder)\b\.?|[<>]"
+    r"|\d+(?:[,.]\d+)?\s*[-–]\s*(?=\d+(?:[,.]\d+)?\s*(?:mm|cm|m)\b)",
+    re.I,
+)
 
 
 def _key(oz: str, component: str) -> tuple:
@@ -46,10 +55,11 @@ def _heading_key(text: str) -> tuple | None:
 
 
 def _property(text: str) -> tuple[str, str] | None:
-    """Parse one complete, unconditional labelled value.
+    """Parse one labelled value; only a value in a supported form alone is exact.
 
-    :param text: wording of one source line.
-    :returns: field and normalized value, or None for unsupported wording.
+    :param text: one statement: a ";" segment, or a label line joined with its value line.
+    :returns: field and normalized value, "open" or "ambiguous", or None if the text does not
+        start with a supported label and a colon.
     """
     m = _PROPERTY.fullmatch(text.strip())
     if not m:
@@ -58,7 +68,7 @@ def _property(text: str) -> tuple[str, str] | None:
     if re.fullmatch(_OPEN, raw, re.I):
         return key, "open"
     if not re.fullmatch(_FIELDS[key][1], raw, re.I):
-        return key, "unknown"
+        return key, "ambiguous"
     if key in ("dicke", "schichtdicke"):
         n, unit = re.fullmatch(r"(\d+(?:[,.]\d+)?)\s*(mm|cm|m)", raw, re.I).groups()
         return key, str(
@@ -69,6 +79,36 @@ def _property(text: str) -> tuple[str, str] | None:
     return key, {"an": "auftragnehmer", "ag": "auftraggeber", "bauseits": "auftraggeber"}.get(
         raw.casefold(), raw.casefold()
     )
+
+
+def _statements(texts: list[str]) -> list[tuple[str, str, int, int]]:
+    """Read the fields that the lines of one position or one DOCX block state.
+
+    A line that ends with a field label ("Dicke:") and a next line that starts with a value,
+    after optional qualifiers, form one statement. Each ";" segment is read on its own.
+
+    :param texts: lines in reading order.
+    :returns: field, value ("ambiguous" for a field named without its own label, else as
+        _property gives it) and the indices of the first and the last source line.
+    """
+    found, i = [], 0
+    while i < len(texts):
+        text, last = texts[i].strip(), i
+        label = _MENTION.search(text) if text.endswith(":") else None
+        if label and i + 1 < len(texts):
+            form = _FIELDS[label[0].casefold()][1]
+            qualified = rf"(?:(?:{_AMBIGUOUS.pattern})\s*)*(?:{_OPEN}|{form})"
+            if re.match(qualified, texts[i + 1].strip(), re.I):
+                last += 1
+                text += " " + texts[last].strip()
+        for segment in text.split(";"):
+            if prop := _property(segment):
+                found.append((*prop, i, last))
+            else:
+                named = dict.fromkeys(m[0].casefold() for m in _MENTION.finditer(segment))
+                found.extend((key, "ambiguous", i, last) for key in named)
+        i = last + 1
+    return found
 
 
 def _component(rows: list[Line]) -> str | None:
@@ -95,10 +135,11 @@ def _component(rows: list[Line]) -> str | None:
 
 
 def pdf_properties(pages: list[list[Line]]) -> list[dict]:
-    """Index labelled properties within positions whose first row states the component.
+    """Index field statements within positions whose first row states the component.
 
     :param pages: extracted lines in reading order.
-    :returns: comparable values and their source references.
+    :returns: classified values and their source references; a value on the line after its
+        label cites the page of the value line and both lines.
     """
     values = []
     for oz, lines in groupby(chain.from_iterable(pages), key=lambda line: line.oz):
@@ -106,22 +147,18 @@ def pdf_properties(pages: list[list[Line]]) -> list[dict]:
         component = _component(rows)
         if component is None:
             continue
-        for line in rows[1:]:
-            if prop := _property(line.text):
-                values.append(
-                    {
-                        "oz": oz,
-                        "component": component,
-                        "key": prop[0],
-                        "value": prop[1],
-                        "source": {
-                            "oz": oz,
-                            "page": line.page + 1,
-                            "excerpt": line.text,
-                            "reference": f"PDF-Seite {line.page + 1}, OZ {oz} · {component}",
-                        },
-                    }
-                )
+        texts = [line.text for line in rows[1:]]
+        for key, value, first, last in _statements(texts):
+            page = rows[last + 1].page + 1
+            source = {
+                "oz": oz,
+                "page": page,
+                "excerpt": "\n".join(texts[first : last + 1]),
+                "reference": f"PDF-Seite {page}, OZ {oz} · {component}",
+            }
+            values.append(
+                {"oz": oz, "component": component, "key": key, "value": value, "source": source}
+            )
     return values
 
 
@@ -151,52 +188,76 @@ def pdf_positions(pages: list[list[Line]]) -> tuple[list[dict], int]:
     return positions, count
 
 
+def _blocks(entries: list[dict]) -> list[tuple[tuple, list[dict]]]:
+    """Group DOCX paragraphs under the OZ heading that precedes them.
+
+    A block ends at the next heading or at an entry that is no body paragraph.
+
+    :param entries: attachment entries in document order.
+    :returns: match key and entries, heading first, for each heading in document order.
+    """
+    blocks, current = [], None
+    for entry in entries:
+        if key := _heading_key(entry["text"].partition(";")[0]):
+            current = [entry]
+            blocks.append((key, current))
+        elif current is not None and entry["id"].startswith("P"):
+            current.append(entry)
+        else:
+            current = None
+    return blocks
+
+
 def compare_attachment(result: dict, attachment: dict) -> dict:
     """Compare unique same-position, same-component fields and retain both citations.
 
+    An ambiguous statement on either side gives no finding: the pair is listed instead.
+
     :param result: PDF or GAEB review.
     :param attachment: imported DOCX with immutable source IDs.
-    :returns: updated review, automatic comparison coverage and the number of DOCX headings
-        without an LV position of the same OZ and component.
+    :returns: updated review, automatic comparison coverage, the pairs not compared because
+        of an ambiguous statement and the number of DOCX headings without an LV position of
+        the same OZ and component.
     """
     findings = [dict(f) for f in result["findings"]]
     positions = {_key(p["oz"], p["component"]) for p in result.get("attachment_positions", [])}
     candidates = defaultdict(list)
     unmatched = 0
-    entries = attachment["entries"]
-    for i, entry in enumerate(entries):
-        header, sep, rest = entry["text"].partition(";")
-        position = _heading_key(header)
-        if position is None:
-            continue
+    for position, block in _blocks(attachment["entries"]):
         unmatched += position not in positions
-        evidence_rows = [(entry, rest)]
-        if not sep:
-            if not entry["id"].startswith("P"):
-                continue
-            evidence_rows = []
-            number = int(entry["id"][1:])
-            for j in range(i + 1, len(entries)):
-                evidence = entries[j]
-                if evidence["id"] != f"P{number + j - i}" or not _PROPERTY.fullmatch(
-                    evidence["text"]
-                ):
-                    break
-                evidence_rows.append((evidence, evidence["text"]))
-        for evidence, raw in evidence_rows:
-            if prop := _property(raw):
-                candidates[*position, prop[0]].append((prop[1], entry, evidence))
+        header = block[0]
+        # The heading names the position; only the text after its first ";" states values.
+        texts = [header["text"].partition(";")[2], *(entry["text"] for entry in block[1:])]
+        for key, value, first, last in _statements(texts):
+            evidence = block[first : last + 1]
+            excerpt = [header, *(entry for entry in evidence if entry is not header)]
+            source = {
+                "docx": evidence[-1]["id"],
+                "reference": f"{attachment['name']} · {evidence[-1]['reference']}",
+                "excerpt": "\n".join(entry["text"] for entry in excerpt),
+            }
+            candidates[*position, key].append((value, source))
     grouped = defaultdict(list)
     for field in result.get("attachment_properties", []):
         grouped[*_key(field["oz"], field["component"]), field["key"]].append(field)
-    checked = 0
+    checked, ambiguous = 0, []
     for key, fields in grouped.items():
         matches = candidates[key]
+        if matches and "ambiguous" in [f["value"] for f in fields] + [m[0] for m in matches]:
+            ambiguous.append(
+                {
+                    "oz": fields[0]["oz"],
+                    "component": fields[0]["component"],
+                    "label": _FIELDS[key[-1]][0],
+                    "sources": [f["source"] for f in fields] + [m[1] for m in matches],
+                }
+            )
+            continue
         if len(matches) != 1 or len(fields) != 1:
             continue
         field = fields[0]
-        value, header, evidence = matches[0]
-        if value in ("open", "unknown") or fields[0]["value"] == "unknown":
+        value, docx = matches[0]
+        if value == "open":
             continue
         checked += 1
         if field["value"] == value:
@@ -245,16 +306,7 @@ def compare_attachment(result: dict, attachment: dict) -> dict:
             question=question,
             review_status=finding.get("review_status", "open"),
             history_match=False,
-            sources=[
-                src,
-                {
-                    "docx": evidence["id"],
-                    "reference": f"{attachment['name']} · {evidence['reference']}",
-                    "excerpt": evidence["text"]
-                    if header is evidence
-                    else header["text"] + "\n" + evidence["text"],
-                },
-            ],
+            sources=[src, docx],
         )
         if existing is None:
             findings.append(finding)
@@ -263,5 +315,6 @@ def compare_attachment(result: dict, attachment: dict) -> dict:
         "attachment": attachment,
         "findings": findings,
         "attachment_checked": checked,
+        "attachment_ambiguous": ambiguous,
         "attachment_unmatched": unmatched,
     }

@@ -30,11 +30,14 @@ _RECORD = {
 }
 
 
-def _result(component: str = "Dachplatte", lv: str = "Dicke: 10 mm") -> dict:
+def _result(
+    component: str = "Dachplatte", lv: str = "Dicke: 10 mm", docx: str = "Dicke: 20 mm"
+) -> dict:
     """Build a review with one LV position and one DOCX block.
 
     :param component: DOCX heading component.
     :param lv: second LV line.
+    :param docx: DOCX paragraph after the heading.
     :returns: review after the deterministic comparison.
     """
     return {
@@ -53,7 +56,7 @@ def _result(component: str = "Dachplatte", lv: str = "Dicke: 10 mm") -> dict:
             "name": "Details.docx",
             "entries": [
                 {"id": "P1", "reference": "Absatz 1", "text": f"OZ 01.01.0010 {component}"},
-                {"id": "P2", "reference": "Absatz 2", "text": "Dicke: 20 mm"},
+                {"id": "P2", "reference": "Absatz 2", "text": docx},
             ],
         },
     }
@@ -202,6 +205,23 @@ def test_alternative_wording_caps_status(monkeypatch: pytest.MonkeyPatch) -> Non
     """
     _answer(monkeypatch, [{**_RECORD, "left_quote": "10 mm"}])
     reviewed = review_attachment(_result(lv="Dicke: 10 mm oder gleichwertig"), _CONFIG)
+    assert reviewed["findings"][0]["assessment"] == "Anwendbarkeit zwischen LV und Anlage prüfen"
+
+
+@pytest.mark.parametrize(
+    ("lv", "docx"), [("Dicke: ca. 10 mm", "Dicke: 20 mm"), ("Dicke: 10 mm", "Dicke: bis 20 mm")]
+)
+def test_qualified_value_caps_status(monkeypatch: pytest.MonkeyPatch, lv: str, docx: str) -> None:
+    """Verify a qualifier in either cited line turns a conflict into a scope check.
+
+    The same conflict between exact values stays a conflict, see the first test.
+
+    :param monkeypatch: pytest fixture.
+    :param lv: cited LV line.
+    :param docx: cited DOCX paragraph.
+    """
+    _answer(monkeypatch, [_RECORD])
+    reviewed = review_attachment(_result(lv=lv, docx=docx), _CONFIG)
     assert reviewed["findings"][0]["assessment"] == "Anwendbarkeit zwischen LV und Anlage prüfen"
 
 

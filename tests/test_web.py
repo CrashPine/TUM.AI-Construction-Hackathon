@@ -20,14 +20,14 @@ import pytest
 from openpyxl import Workbook
 
 from boqcheck import parse, semantic, what_if
-from boqcheck.attachment_scope import _heading_key, _key, pdf_positions
+from boqcheck.attachment_scope import _heading_key, _key, _statements, pdf_positions, pdf_properties
 from boqcheck.docx_context import read_context
 from boqcheck.history import initialize, promote, replay
 from boqcheck.history_report import load_dataset
 from boqcheck.model import Item
 from boqcheck.pdf_extract import extract
 from boqcheck.web import make_app
-from boqcheck.web_gaeb import review_legacy
+from boqcheck.web_gaeb import review_legacy, review_x83
 from boqcheck.web_views import what_if_section
 from boqcheck.xlsx_lv import read_xlsx
 
@@ -737,6 +737,141 @@ def test_real_docx_headings_match_real_pdf_positions(tmp_path: Path) -> None:
         assert "24 Positionsüberschriften der Anlage ohne LV-Position" in rendered
         assert "0 eindeutig zugeordnete Positionsangaben geprüft" in rendered
     assert "status-AX-" not in page
+
+
+def _listing(page: str) -> str:
+    """Return the rendered pairs that the attachment comparison did not compare.
+
+    :param page: review page or report HTML.
+    :returns: the list after the count of pairs with an ambiguous statement.
+    """
+    match = re.search(r"\(mehrdeutige Angabe\)\.</p><ul>.*?</ul>", page, re.DOTALL)
+    assert match
+    return match.group()
+
+
+@pytest.mark.parametrize(
+    ("lines", "statements"),
+    [
+        (["Dicke:", "bis ca. 5 mm als Grundleistung"], [("dicke", "ambiguous", 0, 1)]),
+        (["Dicke:", "10 - 15 cm", "Toleranz: 2 mm"], [("dicke", "ambiguous", 0, 1)]),
+        (["Dicke:", "Länge 2 m"], [("dicke", "ambiguous", 0, 0)]),
+        (
+            ["Farbe: rot; Dicke: 250 µm; Oberflächengüte: Q2,"],
+            [("dicke", "ambiguous", 0, 0), ("oberflächengüte", "q2", 0, 0)],
+        ),
+        (["Wanddicke ca. 25 cm, Dicke der Dämmung offen"], [("dicke", "ambiguous", 0, 0)]),
+    ],
+)
+def test_statement_reader(lines: list[str], statements: list[tuple]) -> None:
+    """Join a label line with a value line and classify each statement.
+
+    A next line that does not start with a value, after optional qualifiers, stays apart.
+
+    :param lines: lines of one position.
+    :param statements: field, value and first and last line of each statement.
+    """
+    assert _statements(lines) == statements
+
+
+def test_real_pdf_value_on_the_line_after_its_label() -> None:
+    """Read a real label line and its value line as one statement and keep the qualifier.
+
+    The excerpt shows both lines.
+    """
+    with pymupdf.open(_ROOF.with_name("LV_00_Roh_und_Erdauarbeiten.pdf")) as document:
+        properties = pdf_properties(extract(document)[0])
+    found = [(p["oz"], p["key"], p["value"], p["source"]["excerpt"]) for p in properties]
+    [(_, key, value, excerpt)] = [statement for statement in found if statement[0] == "3.1.90"]
+    assert (key, Decimal(value), excerpt) == ("dicke", 200, "Dicke:\n20 cm")
+    assert [statement for statement in found if statement[0] == "2.4.40"] == [
+        ("2.4.40", "schichtdicke", "ambiguous", "Schichtdicke:\n> 20 cm")
+    ]
+
+
+def test_real_gaeb_line_with_several_values() -> None:
+    """Read the exact Dicke from a real Langtext line with three values separated by ";"."""
+    name = "501-24-01_GAEB-XML_sas.x83"
+    properties = review_x83(name, _ROOF.with_name(name).read_bytes())["attachment_properties"]
+    [(key, value, excerpt)] = [
+        (p["key"], p["value"], p["source"]["excerpt"])
+        for p in properties
+        if p["oz"] == "02.03.0049"
+    ]
+    assert (key, Decimal(value)) == ("dicke", Decimal("0.15")) and "; Dicke: 0,15 mm;" in excerpt
+
+
+@pytest.mark.parametrize(
+    ("lv", "docx", "checked", "listed"),
+    [
+        # Exact in the LV, a qualifier in the DOCX.
+        ("Dicke: 8 mm", ("Dicke: ca. 10 mm",), 0, 1),
+        # A compound label in the LV, free text in the DOCX.
+        ("Plattendicke: 8 mm", ("Die Dicke beträgt 10 mm.",), 0, 1),
+        # Exact in both, the DOCX value in a later paragraph of the block.
+        ("Dicke: 8 mm", ("Die Platte wird verklebt.", "Dicke: 10 mm"), 1, 0),
+    ],
+)
+def test_ambiguous_attachment_value_is_listed_not_compared(
+    tmp_path: Path, lv: str, docx: tuple[str, ...], checked: int, listed: int
+) -> None:
+    """List a pair with an ambiguous statement with both sources; compare exact values only.
+
+    :param tmp_path: isolated review storage.
+    :param lv: second line of the synthetic PDF position.
+    :param docx: DOCX paragraphs after the heading.
+    :param checked: expected compared fields.
+    :param listed: expected pairs not compared.
+    """
+    with pymupdf.open() as pdf:
+        pdf.new_page().insert_text((50, 50), f"01.01.0010. Dachplatte\n{lv}")
+        source = pdf.tobytes()
+    app = make_app(tmp_path)
+    run = _request(app, "/upload?name=LV.pdf", source, "application/pdf")[1]["Location"]
+    data = _docx("OZ 01.01.0010 Dachplatte", *docx)
+    target = run + "/attachment?name=Synthetisch.docx"
+    assert _request(app, target, data, "application/octet-stream")[0].startswith("303")
+    page = _request(app, run)[2].decode()
+    report = _request(app, run + "/report?download=1")[2].decode()
+    for rendered in (page, report):
+        assert f"{checked} eindeutig zugeordnete Positionsangaben geprüft" in rendered
+        assert f"{listed} Positionsangaben nicht automatisch verglichen" in rendered
+    identifiers = re.findall(r'name="status-(AX-\w+)"', page)
+    if listed:
+        listing = _listing(page)
+        assert not identifiers and "OZ 01.01.0010 · Dachplatte · Dicke" in listing
+        assert f'href="{run}/pdf#page=1"' in listing and 'href="#docx-P2"' in listing
+        assert lv in listing and docx[0] in listing and docx[0] in _listing(report)
+    else:
+        # The ID of a discrepancy between exact values stays as before.
+        assert identifiers == ["AX-" + sha256(b"01.01.0010|dachplatte|dicke").hexdigest()[:12]]
+        assert 'href="#docx-P3"' in _article(page, identifiers[0])
+
+
+def test_gaeb_value_with_a_condition_is_listed_not_compared(tmp_path: Path) -> None:
+    """List, not compare, a real Schichtdicke stated once exactly and once with a condition.
+
+    :param tmp_path: isolated review storage.
+    """
+    name = "GAEB-[PROJEKT_004].X83"
+    data = _ROOF.with_name(name).read_bytes()
+    [(index, item)] = [
+        (i, it) for i, it in enumerate(parse(name, data).items, 1) if it.oz == "02.0009"
+    ]
+    app = make_app(tmp_path)
+    upload = "/upload?" + urlencode({"name": name})
+    run = _request(app, upload, data, "application/xml")[1]["Location"]
+    docx = _docx(f"OZ 2.9 {item.short_text}", "Schichtdicke: 20 cm")
+    target = run + "/attachment?name=Synthetisch.docx"
+    assert _request(app, target, docx, "application/octet-stream")[0].startswith("303")
+    page = _request(app, run)[2].decode()
+    report = _request(app, run + "/report?download=1")[2].decode()
+    assert "0 eindeutig zugeordnete Positionsangaben geprüft" in page and "status-AX-" not in page
+    listing = _listing(page)
+    assert listing.count(f'href="#position-{index}"') == 2 and 'href="#docx-P2"' in listing
+    assert f'<tr id="position-{index}">' in page and 'id="docx-P2"' in page
+    assert "Schichtdicke : 15 cm" in listing and "20 cm über Rohrscheitel" in listing
+    assert "1 Positionsangaben nicht automatisch verglichen" in report
 
 
 def test_invalid_upload_returns_error(tmp_path: Path) -> None:
