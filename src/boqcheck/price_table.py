@@ -1,6 +1,7 @@
-"""Check priced PDF rows with an explicit EUR unit-price and total header."""
+"""Recalculate PDF price tables: two priced EUR layouts and one layout without a currency."""
 
 import re
+from collections import Counter
 from dataclasses import replace
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 
@@ -8,14 +9,147 @@ from .contradictions import Finding
 from .pdf_calculation import _NUMBER
 from .pdf_extract import Line
 from .pdf_hierarchy_totals import hierarchy_totals
-from .pdf_subtotals import SectionTotals
+from .pdf_subtotals import _OPTION, SectionTotals
+
+_QUANTITY_HEADER = ["Leistungsbeschreibung", "Menge ME", "Einheitspreis", "Gesamtbetrag"]
+_BLANK = re.compile(r"\.{6,}")
+
+
+def _rows(page: list[Line]) -> list[list[Line]]:
+    """Group the cells of one page into rows on a shared top edge.
+
+    :param page: cells of one page.
+    :returns: rows from top to bottom, each sorted from left to right.
+    """
+    rows: list[list[Line]] = []
+    for line in sorted(page, key=lambda cell: cell.quad.rect.y0):
+        if not rows or line.quad.rect.y0 - rows[-1][0].quad.rect.y0 > 1.25:
+            rows.append([])
+        rows[-1].append(line)
+    return [sorted(row, key=lambda line: line.quad.rect.x0) for row in rows]
+
+
+def _price_check(
+    oz: str, cells: list[Line], values: tuple[str, str, str], basis: str, currency: str
+) -> tuple[Decimal, Finding | None] | None:
+    """Compare a stated total with quantity × unit price, rounded half up to cents.
+
+    :param oz: position of the row.
+    :param cells: source cells of the row.
+    :param values: quantity, unit price and stated total as printed.
+    :param basis: text after the unit price in the explanation.
+    :param currency: text after each amount in the explanation.
+    :returns: stated total and a finding for a discrepancy, or ``None`` for a non-number.
+    """
+    if any(len(v) > 18 or not re.fullmatch(_NUMBER, v) for v in values):
+        return None
+    qty, price, actual = [Decimal(v.replace(".", "").replace(",", ".")) for v in values]
+    with localcontext() as context:
+        context.prec = 50
+        expected = (qty * price).quantize(Decimal(".01"), rounding=ROUND_HALF_UP)
+    if actual == expected:
+        return actual, None
+    return actual, Finding(
+        "table_price",
+        (tuple(cells),),
+        f"OZ {oz}: {qty} × {price} {basis} = {expected}{currency}. "
+        f"Ausgewiesener Positionsbetrag: {actual}{currency}.",
+        "Welcher Positionsbetrag ist anzusetzen?",
+        "conflict",
+    )
+
+
+def _quantity_table(pages: list[list[Line]]) -> tuple[list[Finding], Counter[str]]:
+    """Check the table headed OZ, Leistungsbeschreibung, Menge ME, Einheitspreis, Gesamtbetrag.
+
+    The OZ row comes before the row with the quantity and both price fields, so that row takes
+    its position from ``Line.oz``. It is computed only for a known OZ without a second
+    quantity row: another row would cite the wrong position. A filled ``Summe <OZ>.`` row is
+    compared with the totals of the positions under that OZ. The header names no currency.
+
+    :param pages: source lines in reading order, grouped by physical page.
+    :returns: discrepancies and counts of rows, checks, unpriced rows and stated totals.
+    """
+    quantities = []
+    sums = []
+    for page in pages:
+        header = None
+        for row in _rows(page):
+            texts = [cell.text for cell in row]
+            if texts[0] in ("OZ", "Ordnungszahl") and texts[1:] == _QUANTITY_HEADER:
+                header = [cell.quad.rect for cell in row]
+                continue
+            if header is None:
+                continue
+            _, text_head, qty_head, price_head, total_head = header
+            prices = [cell for cell in row if abs(cell.quad.rect.x1 - price_head.x1) < 10]
+            totals = [cell for cell in row if abs(cell.quad.rect.x1 - total_head.x1) < 10]
+            if len(totals) != 1:
+                continue
+            if section := re.fullmatch(r"Summe (\d+(?:\.\d+)*)\.", texts[0]):
+                sums.append((section[1], row[0], totals[0]))
+            elif (
+                (quantity := re.fullmatch(rf"({_NUMBER})\s+([A-Za-z][\w²³./-]*)", texts[0]))
+                and text_head.x1 < row[0].quad.rect.x0 <= qty_head.x1
+                and len(prices) <= 1
+                and len(row) == 2 + len(prices)
+            ):
+                quantities.append((row, quantity, prices[0] if prices else None, totals[0]))
+    counts = Counter(rows=len(quantities), sums=len(sums))
+    per_oz = Counter(row[0].oz for row, *_ in quantities)
+    amounts = dict.fromkeys(per_oz)
+    unit_only = {}
+    findings = []
+    for row, quantity, price, total in quantities:
+        oz = row[0].oz
+        unique = oz is not None and per_oz[oz] == 1
+        counts["ambiguous"] += not unique
+        if total.text == "Nur Einh.-Pr.":
+            counts["unit_only"] += 1
+            unit_only[oz] = tuple(row)
+        elif any(_BLANK.fullmatch(cell.text) for cell in (price, total) if cell):
+            counts["blank"] += 1
+        elif unique and price:
+            values = (quantity[1], price.text, total.text)
+            result = _price_check(oz, row, values, f"je Mengeneinheit ({quantity[2]})", "")
+            if result:
+                counts["checked"] += 1
+                amounts[oz] = (result[0], total)
+                if result[1]:
+                    findings.append(result[1])
+    positions = {line.oz for page in pages for line in page if line.oz}
+    optional = {line.oz for page in pages for line in page if _OPTION.search(line.text)}
+    for section, label, cell in sums:
+        if _BLANK.fullmatch(cell.text):
+            counts["blank_sums"] += 1
+            continue
+        prefix = section + "."
+        members = {oz: value for oz, value in amounts.items() if oz and oz.startswith(prefix)}
+        excluded = {oz: unit_only[oz] for oz in members if oz in unit_only}
+        ledger = SectionTotals(
+            section,
+            amounts=members,
+            optional=optional & members.keys(),
+            excluded=set(excluded),
+            markers=excluded,
+            currency="",
+        )
+        # A row without a unique OZ, or a position without a recognised row, may belong here.
+        ledger.ambiguous = counts["ambiguous"] > 0 or members.keys() != {
+            oz for oz in positions if oz.startswith(prefix)
+        }
+        if len(cell.text) <= 18 and re.fullmatch(_NUMBER, cell.text):
+            ledger.reconcile([label, cell])
+        counts["sums_checked"] += ledger.checked
+        findings.extend(ledger.findings)
+    return findings, counts
 
 
 def table_prices(pages: list[list[Line]]) -> tuple[list[Finding], str]:
-    """Compare right-aligned EUR prices on the same baseline as an item and quantity.
+    """Compare right-aligned prices on the same baseline as an item or its quantity.
 
     :param pages: source lines in reading order, grouped by physical page.
-    :returns: source-grounded discrepancies and the number of verified item rows.
+    :returns: source-grounded discrepancies and a German coverage summary.
     """
     findings = []
     checked = eligible = 0
@@ -25,17 +159,11 @@ def table_prices(pages: list[list[Line]]) -> tuple[list[Finding], str]:
     active_split = None
     summary_checked = summary_stated = 0
     for page in pages:
-        rows: list[list[Line]] = []
-        for line in sorted(page, key=lambda cell: cell.quad.rect.y0):
-            if not rows or line.quad.rect.y0 - rows[-1][0].quad.rect.y0 > 1.25:
-                rows.append([])
-            rows[-1].append(line)
         columns = None
         split_header = None
         split = False
         summary = False
-        for row in rows:
-            row = sorted(row, key=lambda line: line.quad.rect.x0)
+        for row in _rows(page):
             texts = [line.text for line in row]
             if texts == ["Pos-Nr. (Pos-", "Menge", "Einheit", "Einheitspreis in", "Gesamtpreis in"]:
                 split_header = row
@@ -145,27 +273,16 @@ def table_prices(pages: list[list[Line]]) -> tuple[list[Finding], str]:
                 values = (quantity[1], cells[2].text, cells[3].text)
             else:
                 continue
-            if any(len(v) > 18 or not re.fullmatch(_NUMBER, v) for v in values):
+            result = _price_check(oz, cells, values, "EUR", " EUR")
+            if result is None:
                 continue
-            qty, price, actual = [Decimal(v.replace(".", "").replace(",", ".")) for v in values]
-            with localcontext() as context:
-                context.prec = 50
-                expected = (qty * price).quantize(Decimal(".01"), rounding=ROUND_HALF_UP)
+            actual, finding = result
             checked += 1
             ledger = active_split if split else sections
             if ledger and ledger.section and oz in ledger.amounts:
                 ledger.amounts[oz] = (actual, replace(cells[-1], oz=oz))
-            if actual != expected:
-                findings.append(
-                    Finding(
-                        "table_price",
-                        (tuple(cells),),
-                        f"OZ {oz}: {qty} × {price} EUR = {expected} EUR. "
-                        f"Ausgewiesener Positionsbetrag: {actual} EUR.",
-                        "Welcher Positionsbetrag ist anzusetzen?",
-                        "conflict",
-                    )
-                )
+            if finding:
+                findings.append(finding)
         if not split:
             position = None
         if not split and columns is None:
@@ -178,9 +295,19 @@ def table_prices(pages: list[list[Line]]) -> tuple[list[Finding], str]:
         findings.extend(section.findings)
     hierarchy, hierarchy_checked, hierarchy_stated = hierarchy_totals(pages)
     findings.extend(hierarchy)
-    return findings, (
-        f"EP/GP-Tabellen: {checked}/{eligible} erkannte Positionszeilen geprüft. "
-        f"Abschnittssummen: {sections.checked + summary_checked}/"
-        f"{sections.stated + summary_stated} geprüft. "
+    quantity_findings, counts = _quantity_table(pages)
+    findings.extend(quantity_findings)
+    coverage = (
+        f"EP/GP-Tabellen: {checked + counts['checked']}/{eligible + counts['rows']} "
+        "erkannte Positionszeilen geprüft. "
+        f"Abschnittssummen: {sections.checked + summary_checked + counts['sums_checked']}/"
+        f"{sections.stated + summary_stated + counts['sums']} geprüft. "
         f"Summenhierarchie: {hierarchy_checked}/{hierarchy_stated} geprüft."
     )
+    if counts["rows"] or counts["sums"]:
+        coverage += (
+            f" Mengenzeilen: {counts['blank']} Preisfelder leer, {counts['unit_only']} nur "
+            f"Einheitspreis, {counts['ambiguous']} ohne eindeutige OZ; "
+            f"{counts['blank_sums']} Summenzeilen leer."
+        )
+    return findings, coverage

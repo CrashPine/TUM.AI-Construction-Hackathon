@@ -50,7 +50,7 @@ verification.
   pricing impact and a German Bieterfrage. Check matching adjacent positions and applicable
   general clauses. Verify that included work does not become a missing-scope finding.
 - [x] Compare labelled PDF and DOCX specifications with matching OZ and component title. Verify clarification, discrepancy, equivalent units and a different component in the HTML report.
-- [ ] Extend attachment analysis to ambiguous free text, additional layouts and GAEB source positions.
+- [x] Extend attachment analysis to ambiguous free text, additional layouts and GAEB source positions. Verified on real PDF and GAEB samples with synthetic DOCX files and a mocked model.
 - [x] Check proposed German PDF typos against the local dictionary and project lexicon.
   Validate the exact source token, retain the original, and export reviewer edits in the report.
 - [x] Add optional token-only online attestation and provenance caching for unresolved words.
@@ -70,7 +70,9 @@ verification.
 - [x] Reconcile the summary hierarchy and tax totals in both priced PDFs (12 checks in Abgabe LV.pdf,
   43 in Angebot AN24-0305.pdf: copies, area and grand totals, net, VAT, gross and carry-overs).
   Abstain on missing or duplicated cells and detect a one-cent change.
-- [ ] Extend PDF arithmetic to table and subtotal layouts beyond the two priced samples.
+- [x] Extend PDF arithmetic to table and subtotal layouts beyond the two priced samples.
+  Recognised 1,367 quantity rows and 147 Summe rows in 29 unpriced PDFs without a finding; no
+  priced sample has this layout, so the filled path is verified on synthetic data only.
 - [x] Import GAEB 90 D84, D83 and D86 through the parser. Fixture tests cover counts, prices and OZs.
 - [x] Connect D83, D84 and D86 to the web review and HTML export. Verify all five uploads,
   missing quantities in the price-only D84 and a changed price with original record evidence.

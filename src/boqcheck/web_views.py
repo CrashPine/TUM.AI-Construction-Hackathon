@@ -200,6 +200,26 @@ def upload_view(model: str | None = None, *, history: bool = False) -> str:
     return _page("LV prüfen", _workspace("upload", {"model": model, "history": history}, body))
 
 
+def _source(base: str, source: dict, report: bool) -> str:
+    """Render one source reference, linked in the review, and its excerpt.
+
+    :param base: internally generated run URL.
+    :param source: PDF page, GAEB position or record, or DOCX entry with its excerpt.
+    :param report: whether the rendering is for export.
+    :returns: rendered reference and excerpt.
+    """
+    ref = escape(source["reference"])
+    if not report and "position" in source:
+        ref = f'<a href="#position-{source["position"]}">{ref}</a>'
+    elif not report and "record" in source:
+        ref = f'<a href="#record-{source["record"]}">{ref}</a>'
+    elif not report and "docx" in source:
+        ref = f'<a href="#docx-{escape(source["docx"])}">{ref}</a>'
+    elif not report:
+        ref = f'<a href="{base}/pdf#page={source["page"]}" target="_blank" rel="noopener">{ref}</a>'
+    return f"<div>{ref}<blockquote>{escape(source['excerpt'])}</blockquote></div>"
+
+
 def _finding(base: str, finding: dict, report: bool, history: bool) -> str:
     """Render one finding and its evidence links.
 
@@ -222,20 +242,7 @@ def _finding(base: str, finding: dict, report: bool, history: bool) -> str:
     if history:
         origin = "Historischer Regel-Treffer" if finding["history_match"] else "Aktuelle Prüfung"
         pieces.append(f'<p class="badge">{origin}</p>')
-    for source in finding["sources"]:
-        ref = escape(source["reference"])
-        if not report and "position" in source:
-            ref = f'<a href="#position-{source["position"]}">{ref}</a>'
-        elif not report and "record" in source:
-            ref = f'<a href="#record-{source["record"]}">{ref}</a>'
-        elif not report and "docx" in source:
-            ref = f'<a href="#docx-{escape(source["docx"])}">{ref}</a>'
-        elif not report:
-            ref = (
-                f'<a href="{base}/pdf#page={source["page"]}" target="_blank" rel="noopener">'
-                f"{ref}</a>"
-            )
-        pieces.append(f"<div>{ref}<blockquote>{escape(source['excerpt'])}</blockquote></div>")
+    pieces.extend(_source(base, source, report) for source in finding["sources"])
     if "original_word" in finding:
         original = escape(finding["original_word"])
         correction = escape(finding["correction"])
@@ -623,6 +630,18 @@ def review_view(
             content.append(
                 f"<p>{len(result['attachment_positions'])} von {result['position_count']} "
                 "LV-Positionen mit OZ und Kurztext erkannt.</p>"
+            )
+        if "attachment_ambiguous" in result:
+            items = "".join(
+                f"<li>OZ {escape(pair['oz'])} · {escape(pair['component'])} · "
+                f"{escape(pair['label'])}"
+                + "".join(_source(base, source, report) for source in pair["sources"])
+                + "</li>"
+                for pair in result["attachment_ambiguous"]
+            )
+            content.append(
+                f"<p>{len(result['attachment_ambiguous'])} Positionsangaben nicht automatisch "
+                "verglichen (mehrdeutige Angabe).</p>" + (f"<ul>{items}</ul>" if items else "")
             )
         if "attachment_unmatched" in result:
             content.append(
