@@ -5,7 +5,7 @@ from hashlib import sha256
 from urllib.error import URLError
 
 from . import semantic
-from .attachment_scope import _HEADING
+from .attachment_scope import _HEADING, _key
 
 # Template wording makes a difference legitimate, so the code, not the model, caps the status.
 _ALTERNATIVE = re.compile(
@@ -13,17 +13,17 @@ _ALTERNATIVE = re.compile(
 )
 
 
-def _blocks(entries: list[dict]) -> dict[tuple[str, str], list[dict]]:
+def _blocks(entries: list[dict]) -> dict[tuple, list[dict]]:
     """Group DOCX paragraphs under the OZ heading that precedes them.
 
     :param entries: attachment entries in document order.
-    :returns: heading entry and following paragraphs, keyed by OZ and folded component.
+    :returns: heading entry and following paragraphs, keyed like the LV positions.
     """
     blocks, current = {}, None
     for entry in entries:
         heading = _HEADING.fullmatch(entry["text"].partition(";")[0].strip())
         if heading:
-            current = blocks.setdefault((heading[1], heading[2].casefold()), [])
+            current = blocks.setdefault(_key(heading[1], heading[2]), [])
             current.append(entry)
         elif current is not None and entry["id"].startswith("P"):
             current.append(entry)
@@ -50,7 +50,7 @@ def review_attachment(result: dict, config: semantic.SemanticConfig | None) -> d
     pairs = [
         (position, blocks[key])
         for position in result.get("attachment_positions", [])
-        if (key := (position["oz"], position["component"].casefold())) in blocks
+        if (key := _key(position["oz"], position["component"])) in blocks
     ]
     findings = [dict(f) for f in result["findings"]]
     warnings, completed, rejected, proposed = [], 0, 0, 0
@@ -92,6 +92,16 @@ def review_attachment(result: dict, config: semantic.SemanticConfig | None) -> d
             line, entry = left[a], right[b]
             if _ALTERNATIVE.search(line["text"] + "\n" + entry["text"]):
                 status = "needs_scope_check"
+            # A GAEB position is one row of the review; a PDF position can span pages.
+            anchor = (
+                {"position": position["position"], "reference": position["reference"]}
+                if "position" in position
+                else {
+                    "page": line["page"],
+                    "reference": f"PDF-Seite {line['page']}, OZ {position['oz']} · "
+                    f"{position['component']}",
+                }
+            )
             question = record.get("question")
             findings.append(
                 {
@@ -112,13 +122,7 @@ def review_attachment(result: dict, config: semantic.SemanticConfig | None) -> d
                     "review_status": "open",
                     "history_match": False,
                     "sources": [
-                        {
-                            "oz": position["oz"],
-                            "page": line["page"],
-                            "excerpt": line["text"],
-                            "reference": f"PDF-Seite {line['page']}, OZ {position['oz']} · "
-                            f"{position['component']}",
-                        },
+                        {"oz": position["oz"], **anchor, "excerpt": line["text"]},
                         {
                             "docx": b,
                             "reference": f"{attachment['name']} · {entry['reference']}",

@@ -19,7 +19,8 @@ import pymupdf
 import pytest
 from openpyxl import Workbook
 
-from boqcheck import semantic, what_if
+from boqcheck import parse, semantic, what_if
+from boqcheck.attachment_scope import _key
 from boqcheck.docx_context import read_context
 from boqcheck.history import initialize, promote, replay
 from boqcheck.history_report import load_dataset
@@ -523,6 +524,97 @@ def test_docx_cell_and_heading_order() -> None:
     ]
     assert entries[0]["reference"] == "Überschrift 1"
     assert entries[2]["reference"] == "Tabelle 1, Zeile 1, Zelle 2"
+
+
+def _docx(*paragraphs: str) -> bytes:
+    r"""Build a synthetic DOCX with one body paragraph per text.
+
+    :param \*paragraphs: paragraph texts in order.
+    :returns: DOCX bytes.
+    """
+    body = "".join(f"<w:p><w:r><w:t>{escape(text)}</w:t></w:r></w:p>" for text in paragraphs)
+    data = BytesIO()
+    with ZipFile(data, "w") as archive:
+        archive.writestr(
+            "word/document.xml",
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            f"<w:body>{body}</w:body></w:document>",
+        )
+    return data.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("name", "oz", "paragraphs", "checked", "unmatched", "differs"),
+    [
+        ("StBALV23040.D86", "03.01.0004", ("OZ 03.01.0004 {}", "Dicke: 120 mm"), 1, 0, True),
+        ("[NUMMER_001]_leer.X83", "03.01.0004", ("3.1.4 – {}", "Dicke: 10 cm"), 1, 0, False),
+        ("[NUMMER_001]_leer.X83", "03.01.0004", ("OZ 3.1.4 {}", "Dicke: 12 cm"), 1, 0, True),
+        ("StBALV23040.D86", "03.01.0004", ("OZ 03.01.0004 Fassade", "Dicke: 12 cm"), 0, 1, False),
+        # 02.0009 states Schichtdicke twice; the heading for 2.10 shows that headings are read.
+        (
+            "GAEB-[PROJEKT_004].X83",
+            "02.0009",
+            ("OZ 2.9 {}", "Schichtdicke: 20 cm", "OZ 2.10 Fassade"),
+            0,
+            1,
+            False,
+        ),
+    ],
+)
+def test_gaeb_attachment_comparison(
+    tmp_path: Path,
+    name: str,
+    oz: str,
+    paragraphs: tuple[str, ...],
+    checked: int,
+    unmatched: int,
+    differs: bool,
+) -> None:
+    """Compare a synthetic DOCX with real GAEB positions through upload and attachment.
+
+    :param tmp_path: isolated review storage.
+    :param name: real GAEB sample.
+    :param oz: position the DOCX describes.
+    :param paragraphs: DOCX paragraphs; the placeholder {} stands for the parsed Kurztext.
+    :param checked: expected compared fields.
+    :param unmatched: expected DOCX headings without a matching position.
+    :param differs: whether a discrepancy finding is expected.
+    """
+    data = _ROOF.with_name(name).read_bytes()
+    [(index, item)] = [(i, it) for i, it in enumerate(parse(name, data).items, 1) if it.oz == oz]
+    # Case and spacing differ from the Kurztext on purpose; matching ignores both.
+    component = "  ".join(item.short_text.upper().split())
+    docx = _docx(*(text.format(component) for text in paragraphs))
+    app = make_app(tmp_path)
+    media = "application/xml" if name.endswith("X83") else "application/octet-stream"
+    run = _request(app, "/upload?" + urlencode({"name": name}), data, media)[1]["Location"]
+    target = run + "/attachment?name=Synthetisch.docx"
+    assert _request(app, target, docx, "application/octet-stream")[0].startswith("303")
+    page = _request(app, run)[2].decode()
+    report = _request(app, run + "/report?download=1")[2].decode()
+    for rendered in (page, report):
+        assert f"{checked} eindeutig zugeordnete Positionsangaben geprüft" in rendered
+        assert f"{unmatched} Positionsüberschriften der Anlage ohne LV-Position" in rendered
+    identifiers = re.findall(r'name="status-(AX-\w+)"', page)
+    assert len(identifiers) == differs
+    if differs:
+        block = _article(page, identifiers[0])
+        assert f'href="#position-{index}"' in block and 'href="#docx-P2"' in block
+        assert f"Position {index} · OZ {oz}" in block and "PDF-Seite" not in block
+        assert "Dicke: 100 mm" in block and paragraphs[1] in block
+        assert "Synthetisch.docx · Absatz 2" in _article(report, identifiers[0])
+
+
+@pytest.mark.parametrize(
+    ("docx", "same"), [("3.1.30A", True), ("3.1.30a", False), ("3.1.30", False)]
+)
+def test_oz_levels_match_as_numbers_with_exact_index(docx: str, same: bool) -> None:
+    """Ignore zero padding of the OZ levels but keep the index letter exact.
+
+    :param docx: OZ as a DOCX heading writes it.
+    :param same: whether it denotes the LV position 03.01.0030A.
+    """
+    assert (_key(docx, "Dach") == _key("03.01.0030A", "dach")) == same
 
 
 def test_invalid_upload_returns_error(tmp_path: Path) -> None:
@@ -1104,10 +1196,9 @@ def test_acceptance_walkthrough(
         form = urlencode(edits).encode()
         assert _request(app, run, form, "application/x-www-form-urlencoded")[0].startswith("303")
     pdf = name.endswith(".pdf")
-    if pdf:
-        docx = _ROOF.with_name("LV-Positionen.docx").read_bytes()
-        target = run + "/attachment?name=LV-Positionen.docx"
-        assert _request(app, target, docx, "application/octet-stream")[0].startswith("303")
+    docx = _ROOF.with_name("LV-Positionen.docx").read_bytes()
+    target = run + "/attachment?name=LV-Positionen.docx"
+    assert _request(app, target, docx, "application/octet-stream")[0].startswith("303")
     page = _request(app, run)[2].decode()
     report = _request(app, run + "/report?download=1")[2].decode()
     for finding in findings:
@@ -1118,9 +1209,12 @@ def test_acceptance_walkthrough(
         question = f'<span class="question">Frage {finding} zu {escape(name)}?</span>'
         assert f"<li><strong>{finding}</strong> {question}</li>" in report
     assert _request(app, run + "/pdf")[0].startswith("200" if pdf else "404")
+    assert "LV-Positionen.docx" in page and "53 Textstellen" in page and "P2 · Absatz 2" in page
+    assert "0 eindeutig zugeordnete Positionsangaben geprüft" in report
+    if not findings:
+        assert "Keine aktiven Befunde." in report
     if pdf:
-        assert "LV-Positionen.docx" in page and "53 Textstellen" in page
-        assert "P2 · Absatz 2" in page and _request(app, run + "/log")[0].startswith("200")
+        assert _request(app, run + "/log")[0].startswith("200")
         pages = int(re.search(r"Textebene: \d+ von (\d+) Seiten", page).group(1))
         assert all(1 <= int(n) <= pages for n in re.findall(r"/pdf#page=(\d+)", page))
     elif name.endswith(".xlsx"):

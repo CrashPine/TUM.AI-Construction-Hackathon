@@ -565,6 +565,11 @@ def review_view(
             f"<p>Automatischer Abgleich LV / DOCX: {result['attachment_checked']} "
             "eindeutig zugeordnete Positionsangaben geprüft.</p>"
         )
+        if gaeb:
+            content.append(
+                f"<p>{result['attachment_unmatched']} Positionsüberschriften der Anlage ohne "
+                "LV-Position mit gleicher OZ und gleichem Kurztext.</p>"
+            )
         if unread := attachment.get("unread"):
             content.append(
                 f"<p>{unread} Textblöcke der Anlage nicht bewertet (Inhaltssteuerelemente, "

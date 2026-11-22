@@ -21,9 +21,9 @@ a missing-scope finding.
 
 `test_acceptance_walkthrough` in `tests/test_web.py` replays the demo for each supported
 format with no model configured: upload, confirm the first finding, write its Bieterfrage,
-save, reload the review and open the report. The confirmed status and the question must
-appear on the reloaded review and in the report, and the source links must point to the
-expected PDF page, position or GAEB 90 record.
+save, attach the real `LV-Positionen.docx`, reload the review and open the report. The
+confirmed status and the question must appear on the reloaded review and in the report, and
+the source links must point to the expected PDF page, position or GAEB 90 record.
 
 | Upload | What the test checks |
 | --- | --- |
@@ -61,3 +61,29 @@ Limitations:
 - There is no calculation for lump-sum items (Pauschal), positions with an adjusted total
   or a price basis other than 1; the section says why.
 - PDF reviews have no parsed positions and no what-if form.
+
+## DOCX attachment to a GAEB review
+
+A DOCX attached to an X83 or GAEB 90 review is compared with the parsed positions. The
+Kurztext of a position is its component. Labelled values in its Langtext, for example
+`Dicke: 100 mm`, are read with the same parser as in the PDF comparison. A value is compared
+only if the DOCX has a heading with the same OZ and the same Kurztext and each document states
+the field once. OZ levels are compared as numbers, so `3.1.4` matches `03.01.0004`; the
+PDF comparison uses the same rule. An index letter must be identical, and a two-level OZ needs
+the prefix `OZ` (`OZ 2.9`). Case and spacing of the Kurztext do not count. The LV source of a
+finding links to the position row. The review and the report show how many values were compared
+and how many DOCX headings have no position with the same OZ and Kurztext. The experimental XLSX
+review uses the same comparison; its rows have no Langtext, so it compares no values.
+
+Limitations:
+
+- No fuzzy matching: a heading that shortens or rewords the Kurztext matches no position.
+- GAEB 90 keeps no physical record for a Langtext line (Satz 26), so the source names the
+  position, not a record line.
+- The local model can be selected only for PDF uploads, so a GAEB review shows that the model
+  comparison did not run. The model comparison accepts GAEB positions; it is tested with a
+  mocked model only.
+- An open Langtext value (`Dicke: offen`) that the DOCX fills counts as compared but gives no
+  finding, because GAEB reviews have no open-scope finding.
+- The tests combine real GAEB samples with small synthetic DOCX files; there is no real DOCX
+  for a GAEB sample.

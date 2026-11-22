@@ -1,5 +1,6 @@
 """Tests for the model comparison of LV positions with their DOCX blocks."""
 
+from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
 from urllib.error import URLError
@@ -7,11 +8,13 @@ from zipfile import ZipFile
 
 import pymupdf
 import pytest
-from test_web import _request
+from test_web import _ROOF, _request
 
-from boqcheck import semantic
+from boqcheck import parse, semantic
+from boqcheck.attachment_scope import compare_attachment
 from boqcheck.attachment_semantic import review_attachment
 from boqcheck.web import make_app
+from boqcheck.web_gaeb import review_legacy, review_x83
 
 _CONFIG = semantic.SemanticConfig("http://127.0.0.1:18081/v1/chat/completions", "test")
 _RECORD = {
@@ -93,6 +96,49 @@ def test_grounded_conflict_cites_both_documents(monkeypatch: pytest.MonkeyPatch)
     assert finding["sources"][0]["excerpt"] == "Dicke: 10 mm"
     assert finding["sources"][1]["reference"] == "Details.docx · Absatz 2"
     assert "1 Vorschläge mit Quellenbeleg" in reviewed["attachment_review"]["summary"]
+
+
+@pytest.mark.parametrize(
+    ("name", "review"), [("StBALV23040.D86", review_legacy), ("[NUMMER_001]_leer.X83", review_x83)]
+)
+def test_gaeb_source_names_the_position(
+    monkeypatch: pytest.MonkeyPatch, name: str, review: Callable[[str, bytes], dict]
+) -> None:
+    """Verify a grounded proposal on a real GAEB position cites the position, not a PDF page.
+
+    :param monkeypatch: pytest fixture.
+    :param name: real GAEB sample.
+    :param review: web review for the sample format.
+    """
+    data = _ROOF.with_name(name).read_bytes()
+    [(index, item)] = [
+        (i, it) for i, it in enumerate(parse(name, data).items, 1) if it.oz == "03.01.0004"
+    ]
+    result = review(name, data)
+    [line] = [
+        line
+        for position in result["attachment_positions"]
+        if position["oz"] == item.oz
+        for line in position["lines"]
+        if line["text"] == "Dicke: 100 mm"
+    ]
+    entries = [
+        {"id": "P1", "reference": "Absatz 1", "text": f"OZ 3.1.4 {item.short_text}"},
+        {"id": "P2", "reference": "Absatz 2", "text": "Dicke: 120 mm"},
+    ]
+    record = {**_RECORD, "left_id": line["id"], "left_quote": "100 mm", "right_quote": "120 mm"}
+    sent = _answer(monkeypatch, [record])
+    attachment = {"name": "Synthetisch.docx", "entries": entries, "unread": 0}
+    reviewed = review_attachment(compare_attachment(result, attachment), _CONFIG)
+    [finding] = [f for f in reviewed["findings"] if f.get("rule") == "attachment_semantic"]
+    assert finding["sources"][0] == {
+        "oz": "03.01.0004",
+        "position": index,
+        "reference": f"Position {index} · OZ 03.01.0004 · {item.short_text}",
+        "excerpt": "Dicke: 100 mm",
+    }
+    assert finding["sources"][1]["reference"] == "Synthetisch.docx · Absatz 2"
+    assert len(sent) == 1 and all("page" not in line for line in sent[0]["left"])
 
 
 def test_other_component_is_not_sent(monkeypatch: pytest.MonkeyPatch) -> None:
