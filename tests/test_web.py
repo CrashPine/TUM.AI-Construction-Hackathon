@@ -20,11 +20,12 @@ import pytest
 from openpyxl import Workbook
 
 from boqcheck import parse, semantic, what_if
-from boqcheck.attachment_scope import _key
+from boqcheck.attachment_scope import _heading_key, _key, pdf_positions
 from boqcheck.docx_context import read_context
 from boqcheck.history import initialize, promote, replay
 from boqcheck.history_report import load_dataset
 from boqcheck.model import Item
+from boqcheck.pdf_extract import extract
 from boqcheck.web import make_app
 from boqcheck.web_gaeb import review_legacy
 from boqcheck.web_views import what_if_section
@@ -616,6 +617,126 @@ def test_oz_levels_match_as_numbers_with_exact_index(docx: str, same: bool) -> N
     :param same: whether it denotes the LV position 03.01.0030A.
     """
     assert (_key(docx, "Dach") == _key("03.01.0030A", "dach")) == same
+
+
+@pytest.mark.parametrize(
+    ("name", "read", "skipped", "counts"),
+    [
+        # 9.2.9 has its position type, not its Kurztext, in the cell beside the OZ.
+        (
+            _ROOF.name,
+            {"9.2.0": "Baustelleneinrichtung", "9.2.10": "Zulage Passplatten"},
+            "9.2.9",
+            (9, 14),
+        ),
+        # The Kurztext of 2.1.40 wraps, so the line after its OZ cell is a fragment.
+        (
+            "Leistungsverzeichnis.pdf",
+            {"1.1.20": "Baustelleneinrichtung vorhalten"},
+            "2.1.40",
+            (209, 274),
+        ),
+    ],
+)
+def test_real_pdf_reads_the_kurztext_beside_the_oz(
+    name: str, read: dict[str, str], skipped: str, counts: tuple[int, int]
+) -> None:
+    """Read the Kurztext cell on the row of the OZ cell and skip rows that state no Kurztext.
+
+    :param name: real sample PDF.
+    :param read: OZ and Kurztext of positions that must be read.
+    :param skipped: OZ whose row states no Kurztext.
+    :param counts: read positions and positions with an OZ.
+    """
+    with pymupdf.open(_ROOF.with_name(name)) as document:
+        positions, count = pdf_positions(extract(document)[0])
+    components = {position["oz"]: position["component"] for position in positions}
+    assert read.items() <= components.items() and skipped not in components
+    assert (len(positions), count) == counts
+
+
+def test_pdf_rows_without_kurztext_are_not_read() -> None:
+    """Skip a synthetic row without OZ, an OZ with text on a lower row and an OZ alone."""
+    with pymupdf.open() as pdf:
+        sheet = pdf.new_page()
+        sheet.insert_text((50, 30), "Projekt")
+        sheet.insert_text((120, 30), "Dach")
+        sheet.insert_text((50, 50), "01.01.0010.")
+        sheet.insert_text((120, 70), "Dachplatte")
+        sheet.insert_text((50, 90), "01.01.0020.")
+        pages = extract(pdf)[0]
+    assert pdf_positions(pages) == ([], 2)
+
+
+def test_two_cell_pdf_attachment_comparison(tmp_path: Path) -> None:
+    """Compare a synthetic PDF with OZ and Kurztext in two cells and a synthetic DOCX.
+
+    The DOCX heading ends with a unit in brackets, which the match ignores.
+
+    :param tmp_path: isolated review storage.
+    """
+    with pymupdf.open() as pdf:
+        sheet = pdf.new_page()
+        sheet.insert_text((50, 50), "01.01.0010.")
+        sheet.insert_text((120, 50), "Dachplatte\nDicke: 8 mm")
+        source = pdf.tobytes()
+    docx = _docx("01.01.0010 – Dachplatte [m²]", "Dicke: 10 mm")
+    app = make_app(tmp_path)
+    run = _request(app, "/upload?name=LV.pdf", source, "application/pdf")[1]["Location"]
+    target = run + "/attachment?name=Synthetisch.docx"
+    assert _request(app, target, docx, "application/octet-stream")[0].startswith("303")
+    page = _request(app, run)[2].decode()
+    assert "1 von 1 LV-Positionen mit OZ und Kurztext erkannt" in page
+    [identifier] = re.findall(r'name="status-(AX-\w+)"', page)
+    block = _article(page, identifier)
+    assert f'href="{run}/pdf#page=1"' in block and 'href="#docx-P2"' in block
+    assert "PDF-Seite 1, OZ 01.01.0010 · Dachplatte" in block and "Dicke: 8 mm" in block
+    assert "01.01.0010 – Dachplatte [m²]" in block and "Dicke: 10 mm" in block
+    report = _request(app, run + "/report?download=1")[2].decode()
+    assert "Synthetisch.docx · Absatz 2" in _article(report, identifier)
+
+
+@pytest.mark.parametrize(
+    ("heading", "component"),
+    [
+        ("1.1.20 – Baustelleneinrichtung vorhalten [Mt.]", "Baustelleneinrichtung vorhalten"),
+        ("OZ 1.1.20 Aushub [m³]", "Aushub"),
+        # A placeholder replaces a word of the Kurztext; it is no unit.
+        ("1.1.20 – Kabel [FIRMA_096]", "Kabel [FIRMA_096]"),
+    ],
+)
+def test_docx_heading_unit_is_not_part_of_the_kurztext(heading: str, component: str) -> None:
+    """Drop a bracketed unit at the end of a DOCX heading and keep a bracketed placeholder.
+
+    :param heading: DOCX paragraph.
+    :param component: Kurztext that the heading names.
+    """
+    assert _heading_key(heading) == _key("1.1.20", component)
+
+
+def test_real_docx_headings_match_real_pdf_positions(tmp_path: Path) -> None:
+    """Attach the real DOCX to the real LV PDF that shares many of its OZs and Kurztexte.
+
+    The 40 DOCX headings end with a unit in brackets and have no labelled values. The source
+    BoQ of the DOCX is not confirmed.
+
+    :param tmp_path: isolated review storage.
+    """
+    app = make_app(tmp_path)
+    data = _ROOF.with_name("Leistungsverzeichnis.pdf").read_bytes()
+    run = _request(app, "/upload?name=LV.pdf", data, "application/pdf")[1]["Location"]
+    docx = _ROOF.with_name("LV-Positionen.docx").read_bytes()
+    headings = [e for e in read_context(docx)[0] if _heading_key(e["text"].partition(";")[0])]
+    assert len(headings) == 40
+    target = run + "/attachment?name=LV-Positionen.docx"
+    assert _request(app, target, docx, "application/octet-stream")[0].startswith("303")
+    page = _request(app, run)[2].decode()
+    for rendered in (page, _request(app, run + "/report?download=1")[2].decode()):
+        assert "209 von 274 LV-Positionen mit OZ und Kurztext erkannt" in rendered
+        # The other 16 headings name a position with the same OZ and Kurztext.
+        assert "24 Positionsüberschriften der Anlage ohne LV-Position" in rendered
+        assert "0 eindeutig zugeordnete Positionsangaben geprüft" in rendered
+    assert "status-AX-" not in page
 
 
 def test_invalid_upload_returns_error(tmp_path: Path) -> None:

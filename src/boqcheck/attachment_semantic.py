@@ -5,7 +5,7 @@ from hashlib import sha256
 from urllib.error import URLError
 
 from . import semantic
-from .attachment_scope import _HEADING, _key
+from .attachment_scope import _heading_key, _key
 
 # Template wording makes a difference legitimate, so the code, not the model, caps the status.
 _ALTERNATIVE = re.compile(
@@ -21,9 +21,8 @@ def _blocks(entries: list[dict]) -> dict[tuple, list[dict]]:
     """
     blocks, current = {}, None
     for entry in entries:
-        heading = _HEADING.fullmatch(entry["text"].partition(";")[0].strip())
-        if heading:
-            current = blocks.setdefault(_key(heading[1], heading[2]), [])
+        if key := _heading_key(entry["text"].partition(";")[0]):
+            current = blocks.setdefault(key, [])
             current.append(entry)
         elif current is not None and entry["id"].startswith("P"):
             current.append(entry)

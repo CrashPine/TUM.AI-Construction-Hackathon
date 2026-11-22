@@ -87,3 +87,40 @@ Limitations:
   finding, because GAEB reviews have no open-scope finding.
 - The tests combine real GAEB samples with small synthetic DOCX files; there is no real DOCX
   for a GAEB sample.
+
+## DOCX attachment to a PDF review
+
+A DOCX attached to a PDF review is compared with the PDF positions whose first row states
+the component. Two layouts are read:
+
+- One line `OZ Component`, as in the synthetic test PDFs.
+- The OZ in its own cell and the Kurztext in the next cell of the same row, as in the sample
+  LV PDFs. The Kurztext is the component.
+
+The match rules are those of the GAEB comparison. In both reviews, a DOCX heading can end
+with the unit in brackets, for example `1.1.20 – Baustelleneinrichtung vorhalten [Mt.]`. The
+unit is not part of the Kurztext for the match, and excerpts keep the full paragraph. A
+placeholder in brackets, such as `[FIRMA_096]`, is not a unit. The PDF review and the report
+show how many positions with an OZ have a recognized Kurztext and how many DOCX headings have
+no position with the same OZ and Kurztext.
+
+The 25 sample PDFs with OZs have 970 positions; 792 are read. With the real
+`LV-Positionen.docx` and `Leistungsverzeichnis.pdf`, 209 of 274 positions are read and 16 of
+the 40 headings match. Of the other 24 headings, 16 name a read position with another Kurztext
+and 8 name a position that is not read. The DOCX has no labelled values, so no value is
+compared. The source BoQ of the DOCX is not confirmed.
+
+Limitations:
+
+- If the cell next to the OZ holds the position type (`*** Bedarfsposition ohne GB` or
+  `mit GB`), the position is not read (100 positions in the samples).
+- If the line after the OZ cell is on a lower row, the position is not read (78 positions in
+  the samples). In 77 of them, the first Kurztext line extracts before the OZ cell, at the end
+  of the previous position, as when a Kurztext wraps. The previous position then has one line
+  too many, also in the model comparison.
+- Only the Kurztext line on the OZ row is read. A Kurztext that continued on the next row
+  would be cut there and match no heading.
+- The unit is not compared, and there is no fuzzy matching.
+- If a Kurztext itself ends with a word in brackets, for example `[PE]`, the DOCX heading
+  loses that word and matches no position. No Kurztext in the samples ends so.
+- The model comparison of PDF positions is tested with a mocked model only.

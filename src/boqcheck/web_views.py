@@ -565,7 +565,12 @@ def review_view(
             f"<p>Automatischer Abgleich LV / DOCX: {result['attachment_checked']} "
             "eindeutig zugeordnete Positionsangaben geprüft.</p>"
         )
-        if gaeb:
+        if "position_count" in result:
+            content.append(
+                f"<p>{len(result['attachment_positions'])} von {result['position_count']} "
+                "LV-Positionen mit OZ und Kurztext erkannt.</p>"
+            )
+        if "attachment_unmatched" in result:
             content.append(
                 f"<p>{result['attachment_unmatched']} Positionsüberschriften der Anlage ohne "
                 "LV-Position mit gleicher OZ und gleichem Kurztext.</p>"

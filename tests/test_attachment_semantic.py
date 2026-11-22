@@ -13,6 +13,8 @@ from test_web import _ROOF, _request
 from boqcheck import parse, semantic
 from boqcheck.attachment_scope import compare_attachment
 from boqcheck.attachment_semantic import review_attachment
+from boqcheck.docx_context import read_context
+from boqcheck.review_pdf import review_pdf
 from boqcheck.web import make_app
 from boqcheck.web_gaeb import review_legacy, review_x83
 
@@ -139,6 +141,47 @@ def test_gaeb_source_names_the_position(
     }
     assert finding["sources"][1]["reference"] == "Synthetisch.docx · Absatz 2"
     assert len(sent) == 1 and all("page" not in line for line in sent[0]["left"])
+
+
+def test_real_pdf_positions_reach_the_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Send each real LV position that a real DOCX heading names to the mocked model.
+
+    16 headings of LV-Positionen.docx share OZ and Kurztext with Leistungsverzeichnis.pdf. The
+    fixed answer cites one of these positions, so the other 15 requests reject it.
+
+    :param tmp_path: artifact directory parent.
+    :param monkeypatch: pytest fixture.
+    """
+    pdf = _ROOF.with_name("Leistungsverzeichnis.pdf")
+    result = review_pdf(pdf.name, pdf.read_bytes(), tmp_path / "review")
+    entries, unread = read_context(_ROOF.with_name("LV-Positionen.docx").read_bytes())
+    [entry] = [e for e in entries if e["text"].startswith("1.1.20 ")]
+    [position] = [p for p in result["attachment_positions"] if p["oz"] == "1.1.20"]
+    line = position["lines"][1]
+    record = {
+        **_RECORD,
+        "left_id": line["id"],
+        "right_id": entry["id"],
+        "left_quote": "vorhalten",
+        "right_quote": "[Mt.]",
+    }
+    sent = _answer(monkeypatch, [record])
+    attachment = {"name": "LV-Positionen.docx", "entries": entries, "unread": unread}
+    reviewed = review_attachment(compare_attachment(result, attachment), _CONFIG)
+    [finding] = [f for f in reviewed["findings"] if f.get("rule") == "attachment_semantic"]
+    assert len(sent) == 16
+    assert finding["sources"][0] == {
+        "oz": "1.1.20",
+        "page": line["page"],
+        "reference": f"PDF-Seite {line['page']}, OZ 1.1.20 · Baustelleneinrichtung vorhalten",
+        "excerpt": "Baustelleneinrichtung vorhalten",
+    }
+    assert finding["sources"][1]["reference"] == f"LV-Positionen.docx · {entry['reference']}"
+    assert reviewed["attachment_review"]["warnings"] == [
+        "Modellvorschläge ohne gültigen Quellenbeleg verworfen: 15."
+    ]
 
 
 def test_other_component_is_not_sent(monkeypatch: pytest.MonkeyPatch) -> None:

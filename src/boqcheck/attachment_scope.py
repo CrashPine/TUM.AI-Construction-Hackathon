@@ -14,6 +14,9 @@ from .scope import _FIELDS, _OPEN
 _HEADING = re.compile(
     r"(?:OZ\s+|(?=\d+(?:\.\d+){2}))(\d+(?:\.\d+)+[A-Za-z]?)\.?\s+(?:[–—-]\s+)?(.+)", re.I
 )
+# A DOCX heading can end with the unit in brackets ("[Mt.]"), which an LV keeps in its own
+# column. Placeholders such as [FIRMA_096] replace words of the Kurztext, so they stay.
+_UNIT = re.compile(r"\s+\[[^\s\[\]_]+\]$")
 _PROPERTY = re.compile(rf"({'|'.join(_FIELDS)})\s*:\s*(.+?)\.?$", re.I)
 
 
@@ -30,6 +33,16 @@ def _key(oz: str, component: str) -> tuple:
     levels = re.fullmatch(r"(\d+(?:\.\d+)*)([A-Za-z]?)", oz)
     number = (tuple(map(int, levels[1].split("."))), levels[2]) if levels else oz
     return number, " ".join(component.split()).casefold()
+
+
+def _heading_key(text: str) -> tuple | None:
+    """Read the match key of a DOCX position heading without a bracketed unit at its end.
+
+    :param text: paragraph or cell text before an optional ";".
+    :returns: key as built by _key, or None if the text is no position heading.
+    """
+    heading = _HEADING.fullmatch(text.strip())
+    return _key(heading[1], _UNIT.sub("", heading[2])) if heading else None
 
 
 def _property(text: str) -> tuple[str, str] | None:
@@ -58,8 +71,31 @@ def _property(text: str) -> tuple[str, str] | None:
     )
 
 
+def _component(rows: list[Line]) -> str | None:
+    """Read the component that the first row of one OZ group states.
+
+    The row is one line "OZ Component", or an OZ cell followed by the Kurztext cell on the
+    same row, as in the sample PDFs. A cell with the position type ("*** Bedarfsposition ohne
+    GB") is no Kurztext.
+
+    :param rows: lines of one OZ in reading order.
+    :returns: heading or Kurztext, or None if the lines have no OZ or their first row states
+        no component.
+    """
+    first, oz = rows[0], rows[0].oz
+    if heading := _HEADING.fullmatch(first.text):
+        return heading[2] if heading[1] == oz else None
+    if len(rows) < 2 or first.text.removesuffix(".") != oz:
+        return None
+    # The first line of a wrapped Kurztext extracts before the OZ cell, so the line after the
+    # cell is then a fragment on the next row.
+    cell, text = first.quad.rect, rows[1].quad.rect
+    same_row = rows[1].page == first.page and cell.y0 < (text.y0 + text.y1) / 2 < cell.y1
+    return rows[1].text if same_row and not rows[1].text.startswith("*") else None
+
+
 def pdf_properties(pages: list[list[Line]]) -> list[dict]:
-    """Index labelled properties within positions having an explicit component heading.
+    """Index labelled properties within positions whose first row states the component.
 
     :param pages: extracted lines in reading order.
     :returns: comparable values and their source references.
@@ -67,43 +103,44 @@ def pdf_properties(pages: list[list[Line]]) -> list[dict]:
     values = []
     for oz, lines in groupby(chain.from_iterable(pages), key=lambda line: line.oz):
         rows = list(lines)
-        heading = _HEADING.fullmatch(rows[0].text)
-        if not heading or heading[1] != oz:
+        component = _component(rows)
+        if component is None:
             continue
         for line in rows[1:]:
             if prop := _property(line.text):
                 values.append(
                     {
                         "oz": oz,
-                        "component": heading[2],
+                        "component": component,
                         "key": prop[0],
                         "value": prop[1],
                         "source": {
                             "oz": oz,
                             "page": line.page + 1,
                             "excerpt": line.text,
-                            "reference": f"PDF-Seite {line.page + 1}, OZ {oz} · {heading[2]}",
+                            "reference": f"PDF-Seite {line.page + 1}, OZ {oz} · {component}",
                         },
                     }
                 )
     return values
 
 
-def pdf_positions(pages: list[list[Line]]) -> list[dict]:
-    """Collect the lines of positions having an explicit component heading.
+def pdf_positions(pages: list[list[Line]]) -> tuple[list[dict], int]:
+    """Collect the lines of positions whose first row states the component.
 
     :param pages: extracted lines in reading order.
-    :returns: OZ, component and lines with stable IDs and 1-based pages.
+    :returns: OZ, component and lines with stable IDs and 1-based pages, and the number of
+        positions with an OZ.
     """
-    positions, number = [], 0
+    positions, number, count = [], 0, 0
     for oz, lines in groupby(chain.from_iterable(pages), key=lambda line: line.oz):
         rows = list(lines)
-        heading = _HEADING.fullmatch(rows[0].text)
-        if heading and heading[1] == oz:
+        count += oz is not None
+        if component := _component(rows):
             positions.append(
                 {
                     "oz": oz,
-                    "component": heading[2],
+                    "component": component,
                     "lines": [
                         {"id": f"L{number + i}", "page": line.page + 1, "text": line.text}
                         for i, line in enumerate(rows)
@@ -111,7 +148,7 @@ def pdf_positions(pages: list[list[Line]]) -> list[dict]:
                 }
             )
         number += len(rows)
-    return positions
+    return positions, count
 
 
 def compare_attachment(result: dict, attachment: dict) -> dict:
@@ -129,10 +166,9 @@ def compare_attachment(result: dict, attachment: dict) -> dict:
     entries = attachment["entries"]
     for i, entry in enumerate(entries):
         header, sep, rest = entry["text"].partition(";")
-        heading = _HEADING.fullmatch(header.strip())
-        if not heading:
+        position = _heading_key(header)
+        if position is None:
             continue
-        position = _key(heading[1], heading[2])
         unmatched += position not in positions
         evidence_rows = [(entry, rest)]
         if not sep:
