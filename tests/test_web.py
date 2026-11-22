@@ -600,6 +600,7 @@ def test_gaeb_attachment_comparison(
     if differs:
         block = _article(page, identifiers[0])
         assert f'href="#position-{index}"' in block and 'href="#docx-P2"' in block
+        assert f'<tr id="position-{index}"><th scope="row">{oz}</th>' in page
         assert f"Position {index} · OZ {oz}" in block and "PDF-Seite" not in block
         assert "Dicke: 100 mm" in block and paragraphs[1] in block
         assert "Synthetisch.docx · Absatz 2" in _article(report, identifiers[0])
