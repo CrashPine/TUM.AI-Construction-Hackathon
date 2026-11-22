@@ -138,3 +138,47 @@ def test_scope_questions_use_adjacent_and_general_conditions(tmp_path: Path) -> 
             page.insert_text((72, 72 + index * 27), line)
         result = review_pdf("included-scope.pdf", document.tobytes(), tmp_path / "run")
     assert result["findings"] == []
+
+
+def test_shaft_model_receives_both_sources_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Send both shaft citations within one request and report the matched finding.
+
+    :param tmp_path: isolated artifact location.
+    :param monkeypatch: substitute the embedding-free chat transport.
+    """
+    from boqcheck import semantic
+
+    def reply(config: semantic.SemanticConfig, payload: dict) -> list:
+        """Return a candidate using the two exact source quotes.
+
+        :param config: local comparison budget.
+        :param payload: emitted source groups.
+        :returns: a grounded semantic response.
+        """
+        assert config.max_requests == 1
+        left = next(line for line in payload["left"] if "8 mm" in line["text"])
+        right = next(line for line in payload["left"] if "15 mm" in line["text"])
+        assert (left["page"], right["page"]) == (2, 5)
+        return [
+            {
+                "left_id": left["id"],
+                "right_id": right["id"],
+                "left_quote": "8 mm",
+                "right_quote": "15 mm",
+                "status": "needs_scope_check",
+                "explanation": "Körnung klären.",
+            }
+        ]
+
+    monkeypatch.setattr(semantic, "_request", reply)
+    path = Path(__file__).resolve().parents[1] / "data/raw/LV-Schachtbauwerk.pdf"
+    result = review_pdf(
+        path.name,
+        path.read_bytes(),
+        tmp_path / "shaft",
+        semantic=semantic.SemanticConfig("", "test", 1),
+    )
+    (finding,) = result["findings"]
+    assert "Modellbefund an denselben Quellen" in finding["method"]
