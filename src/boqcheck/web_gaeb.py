@@ -1,10 +1,11 @@
 """Adapt the GAEB checker result to the shared web review contract."""
 
 from . import parse
+from .attachment_scope import _property
 from .calculation import CalculationFinding, check_calculations
 from .gaeb90 import ItemRecords, parse_gaeb90
 from .gaeb_checks import check_boq
-from .model import BoQ
+from .model import BoQ, Item
 
 _TITLES = {
     "duplicate_oz": "Doppelte OZ",
@@ -40,6 +41,65 @@ def _explanation(finding: dict) -> str:
     )
 
 
+def _reference(item: Item, index: int, references: list[str] | None) -> str:
+    """Name a position by its number or sheet row and its OZ.
+
+    :param item: parsed position.
+    :param index: 1-based position number in source order.
+    :param references: optional sheet and row labels.
+    :returns: German source reference.
+    """
+    return (references[index - 1] if references else f"Position {index}") + (
+        f" · OZ {item.oz}" if item.oz else ""
+    )
+
+
+def _attachment_fields(items: tuple[Item, ...], references: list[str] | None = None) -> dict:
+    """Prepare the positions for the DOCX comparison: Kurztext as component, Langtext lines.
+
+    GAEB 90 keeps no physical record for a Langtext line, so every source names the position.
+
+    :param items: parsed positions in source order.
+    :param references: optional sheet and row labels.
+    :returns: labelled Langtext values and position lines with review-wide line IDs.
+    """
+    properties, positions, number = [], [], 0
+    for index, item in enumerate(items, 1):
+        component = " ".join(item.short_text.split())
+        reference = f"{_reference(item, index, references)} · {component}"
+        texts = [line.strip() for line in item.long_text.split("\n") if line.strip()]
+        for text in texts:
+            if prop := _property(text):
+                properties.append(
+                    {
+                        "oz": item.oz,
+                        "component": component,
+                        "key": prop[0],
+                        "value": prop[1],
+                        "source": {
+                            "position": index,
+                            "oz": item.oz,
+                            "reference": reference,
+                            "excerpt": text,
+                        },
+                    }
+                )
+        lines = [
+            {"id": f"L{number + i}", "text": text} for i, text in enumerate([component, *texts])
+        ]
+        number += len(lines)
+        positions.append(
+            {
+                "oz": item.oz,
+                "component": component,
+                "position": index,
+                "reference": reference,
+                "lines": lines,
+            }
+        )
+    return {"attachment_properties": properties, "attachment_positions": positions}
+
+
 def review_x83(name: str, data: bytes) -> dict:
     """Import one X83 and prepare structural findings for the web workflow.
 
@@ -67,8 +127,7 @@ def review_positions(boq: BoQ, references: list[str] | None = None) -> dict:
             sources.append(
                 {
                     "position": index,
-                    "reference": (references[index - 1] if references else f"Position {index}")
-                    + (f" · OZ {item.oz}" if item.oz else ""),
+                    "reference": _reference(item, index, references),
                     "excerpt": item.short_text or item.long_text or "Keine Leistungsbeschreibung.",
                 }
             )
@@ -93,6 +152,7 @@ def review_positions(boq: BoQ, references: list[str] | None = None) -> dict:
         "gaeb": report,
         "positions": boq.items,
         "sheet_references": references,
+        **_attachment_fields(boq.items, references),
     }
 
 
@@ -192,6 +252,7 @@ def review_legacy(name: str, data: bytes) -> dict:
             for (code, oz), lines in records.items()
             for i, raw in lines
         ),
+        **_attachment_fields(boq.items),
     }
 
 

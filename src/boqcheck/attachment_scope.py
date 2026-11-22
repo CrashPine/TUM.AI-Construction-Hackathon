@@ -9,8 +9,27 @@ from itertools import chain, groupby
 from .pdf_extract import Line
 from .scope import _FIELDS, _OPEN
 
-_HEADING = re.compile(r"(?:OZ\s+)?(\d+(?:\.\d+){2,}[A-Za-z]?)\.?\s+(?:[–—-]\s+)?(.+)", re.I)
+# A two-level OZ (one section level, as in some GAEB files) counts only after an explicit "OZ",
+# because amounts such as "1.000 Stück" also have two levels.
+_HEADING = re.compile(
+    r"(?:OZ\s+|(?=\d+(?:\.\d+){2}))(\d+(?:\.\d+)+[A-Za-z]?)\.?\s+(?:[–—-]\s+)?(.+)", re.I
+)
 _PROPERTY = re.compile(rf"({'|'.join(_FIELDS)})\s*:\s*(.+?)\.?$", re.I)
+
+
+def _key(oz: str, component: str) -> tuple:
+    """Build the match key of a position: OZ levels as integers and the folded component.
+
+    A DOCX may drop the zero padding of a GAEB OZ ("3.1.3" for "03.01.0003"). An OZ without
+    numeric levels, as an XLSX cell may hold, stays text and so matches no DOCX heading.
+
+    :param oz: OZ as written, with an optional index letter.
+    :param component: position heading or Kurztext.
+    :returns: comparable OZ and component.
+    """
+    levels = re.fullmatch(r"(\d+(?:\.\d+)*)([A-Za-z]?)", oz)
+    number = (tuple(map(int, levels[1].split("."))), levels[2]) if levels else oz
+    return number, " ".join(component.split()).casefold()
 
 
 def _property(text: str) -> tuple[str, str] | None:
@@ -100,16 +119,21 @@ def compare_attachment(result: dict, attachment: dict) -> dict:
 
     :param result: PDF or GAEB review.
     :param attachment: imported DOCX with immutable source IDs.
-    :returns: updated review and automatic comparison coverage.
+    :returns: updated review, automatic comparison coverage and the number of DOCX headings
+        without an LV position of the same OZ and component.
     """
     findings = [dict(f) for f in result["findings"]]
+    positions = {_key(p["oz"], p["component"]) for p in result.get("attachment_positions", [])}
     candidates = defaultdict(list)
+    unmatched = 0
     entries = attachment["entries"]
     for i, entry in enumerate(entries):
         header, sep, rest = entry["text"].partition(";")
         heading = _HEADING.fullmatch(header.strip())
         if not heading:
             continue
+        position = _key(heading[1], heading[2])
+        unmatched += position not in positions
         evidence_rows = [(entry, rest)]
         if not sep:
             if not entry["id"].startswith("P"):
@@ -125,12 +149,10 @@ def compare_attachment(result: dict, attachment: dict) -> dict:
                 evidence_rows.append((evidence, evidence["text"]))
         for evidence, raw in evidence_rows:
             if prop := _property(raw):
-                candidates[heading[1], heading[2].casefold(), prop[0]].append(
-                    (prop[1], entry, evidence)
-                )
+                candidates[*position, prop[0]].append((prop[1], entry, evidence))
     grouped = defaultdict(list)
     for field in result.get("attachment_properties", []):
-        grouped[field["oz"], field["component"].casefold(), field["key"]].append(field)
+        grouped[*_key(field["oz"], field["component"]), field["key"]].append(field)
     checked = 0
     for key, fields in grouped.items():
         matches = candidates[key]
@@ -152,7 +174,8 @@ def compare_attachment(result: dict, attachment: dict) -> dict:
                     for f in findings
                     if f.get("rule") == "open_scope"
                     and any(
-                        s["oz"] == key[0] and s["excerpt"] == src["excerpt"] for s in f["sources"]
+                        s["oz"] == field["oz"] and s["excerpt"] == src["excerpt"]
+                        for s in f["sources"]
                     )
                 ),
                 None,
@@ -163,12 +186,14 @@ def compare_attachment(result: dict, attachment: dict) -> dict:
         if resolved and existing is None:
             continue
         finding = existing if existing is not None else {}
+        # Hashing the LV spelling keeps the IDs that PDF findings had before OZ normalization.
+        identity = "|".join((field["oz"], field["component"].casefold(), key[2]))
         label = _FIELDS[key[2]][0]
-        question = "" if resolved else f"Welche Angabe zu {label} gilt für OZ {key[0]}?"
+        question = "" if resolved else f"Welche Angabe zu {label} gilt für OZ {field['oz']}?"
         if existing is not None and existing.get("review_edited"):
             question = existing["question"]
         finding.update(
-            id=finding.get("id", "AX-" + sha256("|".join(key).encode()).hexdigest()[:12]),
+            id=finding.get("id", "AX-" + sha256(identity.encode()).hexdigest()[:12]),
             assessment="Durch Anlage geklärt" if resolved else "Abweichung zwischen LV und Anlage",
             rule="attachment_scope",
             category="Leistungsumfang",
@@ -176,9 +201,10 @@ def compare_attachment(result: dict, attachment: dict) -> dict:
             evidence="Gleiche OZ, Bauteilbezeichnung und Eigenschaft",
             impact=f"Die Angabe zu {label} beeinflusst die Kalkulation für {field['component']}.",
             explanation=(
-                f"Die Anlage konkretisiert {label} für OZ {key[0]}."
+                f"Die Anlage konkretisiert {label} für OZ {field['oz']}."
                 if resolved
-                else f"LV und Anlage nennen unterschiedliche Werte für {label} bei OZ {key[0]}."
+                else "LV und Anlage nennen unterschiedliche Werte für "
+                f"{label} bei OZ {field['oz']}."
             ),
             question=question,
             review_status=finding.get("review_status", "open"),
@@ -196,4 +222,10 @@ def compare_attachment(result: dict, attachment: dict) -> dict:
         )
         if existing is None:
             findings.append(finding)
-    return {**result, "attachment": attachment, "findings": findings, "attachment_checked": checked}
+    return {
+        **result,
+        "attachment": attachment,
+        "findings": findings,
+        "attachment_checked": checked,
+        "attachment_unmatched": unmatched,
+    }
