@@ -1,4 +1,4 @@
-# AI Estimation and Bidding Assistant for Bills of Quantities
+# PUManager
 
 Team repository for **Challenge A: AI-Powered Cost Estimation and BoQ Analysis** at the TUM.AI
 Construction Hackathon.

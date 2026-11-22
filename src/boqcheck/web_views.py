@@ -39,19 +39,19 @@ _HISTORY_FIELDS = """
 """
 
 _STYLE = """
-:root{font:16px/1.55 system-ui,sans-serif;color:#202620;background:#f4f6f3}
+:root{font:16px/1.55 system-ui,sans-serif;color:#171717;background:#f4f3ef}
 body{margin:0}main{max-width:54rem;padding:2rem 1.25rem;margin:auto}
 h1,h2,h3{line-height:1.2} h1{margin-top:.4rem} header{margin-bottom:2rem}
-a{color:#215438} nav{display:flex;flex-wrap:wrap;gap:.6rem 1rem}
-article{background:white;border:1px solid #d5ddd5;border-radius:.55rem;padding:1rem 1.25rem;
-margin:1rem 0}blockquote{margin:.3rem 0 1rem;padding:.4rem .85rem;border-left:4px solid #d5a62e;
-background:#fbf7eb}label{display:block;font-weight:600;margin:.7rem 0 .25rem}
+a{color:#171717} nav{display:flex;flex-wrap:wrap;gap:.6rem 1rem}
+article{background:white;border:1px solid #dedbd0;border-radius:.55rem;padding:1rem 1.25rem;
+margin:1rem 0}blockquote{margin:.3rem 0 1rem;padding:.4rem .85rem;border-left:4px solid #FFD400;
+background:#fffae5}label{display:block;font-weight:600;margin:.7rem 0 .25rem}
 textarea{width:100%;box-sizing:border-box}button,select,textarea,input{font:inherit}
-button{cursor:pointer;background:#215438;color:white;border:0;border-radius:.3rem;
+button{cursor:pointer;background:#FFD400;color:#171717;border:0;border-radius:.3rem;
 padding:.5rem .9rem}button:disabled{opacity:.6;cursor:wait}
-.badge{font-size:.9rem;color:#465347}.actions{margin-top:1rem}.question{white-space:pre-wrap}
+.badge{font-size:.9rem;color:#58554a}.actions{margin-top:1rem}.question{white-space:pre-wrap}
 .table{overflow:auto}table{border-collapse:collapse;width:100%}
-td,th{padding:.55rem;text-align:left;border-bottom:1px solid #d5ddd5}td{vertical-align:top}
+td,th{padding:.55rem;text-align:left;border-bottom:1px solid #dedbd0}td{vertical-align:top}
 tr:target{background:#fbf2cf}details p{white-space:pre-wrap}
 @page{size:A4;margin:16mm}
 @media print{nav{display:none} :root,article{background:white;color:black}
@@ -154,8 +154,8 @@ def _page(title: str, content: str, *, workspace: bool = True) -> str:
     return (
         f'<!doctype html><html lang="de"><head><meta charset="utf-8">'
         f'<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f"<title>{escape(title)} | BidGuard AI</title><style>{_STYLE}</style>{assets}</head>"
-        f'<body><main><header><div class="badge">BidGuard AI</div>'
+        f"<title>{escape(title)} | PUManager</title><style>{_STYLE}</style>{assets}</head>"
+        f'<body><main><header><div class="badge">PUManager</div>'
         f"<h1>{escape(title)}</h1></header>{content}</main></body></html>"
     )
 

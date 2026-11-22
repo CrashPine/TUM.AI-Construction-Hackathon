@@ -43,7 +43,7 @@ def test_review_exports_both_passages(
             assert page.get_text() == source[page.number].get_text()
             words = [pymupdf.Rect(word[:4]) for word in page.get_text("words")]
             for annotation in page.annots():
-                if annotation.info["title"] != "BidGuard AI":
+                if annotation.info["title"] != "PUManager":
                     continue
                 if annotation.type[1] == "Highlight":
                     assert tuple(annotation.colors["stroke"]) == (1, 1, 0)

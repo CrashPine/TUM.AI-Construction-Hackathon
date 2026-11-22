@@ -92,7 +92,7 @@ function Upload({model, history}) {
 
   return <div className="bg-upload-layout">
     <section className="bg-intro" aria-labelledby="bg-headline">
-      <div className="bg-brandline"><span className="bg-mark" aria-hidden="true">B</span> BIDGUARD AI</div>
+      <div className="bg-brandline"><span className="bg-mark" aria-hidden="true">P</span> PUManager</div>
       <h1 id="bg-headline">Ausschreibung prüfen</h1>
       <p>Finden Sie Widersprüche, offene Anforderungen und Rechenabweichungen mit Belegen aus Ihrer Ausschreibung.</p>
       <ul className="bg-formats" aria-label="Unterstützte Formate">{formats.map(format => <li key={format}>{format}</li>)}</ul>

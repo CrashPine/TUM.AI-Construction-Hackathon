@@ -515,7 +515,7 @@ def main() -> None:
         with make_server(
             "127.0.0.1", args.port, _serialize_writes(application), server_class=_LocalServer
         ) as server:
-            print(f"BidGuard AI · http://127.0.0.1:{server.server_port}", flush=True)
+            print(f"PUManager · http://127.0.0.1:{server.server_port}", flush=True)
             try:
                 server.serve_forever()
             except KeyboardInterrupt:
