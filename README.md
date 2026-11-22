@@ -20,7 +20,9 @@ From the repository root, run:
 
 The launcher checks the local Ollama model, installs locked dependencies, and starts
 the web app. Open the loopback URL printed in the terminal and enable the model
-checkbox on a PDF upload. The default budget is one comparison. For a broader,
+checkbox on a PDF upload. The default model mode reviews every text window and uses
+the configured budget for priority checks and selected cross-window comparisons.
+Choose **Stichprobe (schnell)** to cap the entire run at the configured budget. For a broader,
 slower review pass `-Comparisons 6`. Use `-Port 8001` if port 8000 is occupied,
 `-OllamaPort 11434` for that Ollama instance, or `-RulesOnly` for offline checks.
 

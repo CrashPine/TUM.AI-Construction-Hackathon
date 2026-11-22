@@ -123,7 +123,7 @@ def test_limited_budget_spans_the_document(monkeypatch: pytest.MonkeyPatch) -> N
     assert calls == [windows[0], windows[-1]]
     assert not findings
     assert warnings
-    assert coverage.startswith("2/6")
+    assert coverage.startswith("2/2")
     assert "1 (alle Textzeilen übermittelt), 2 (teilweise abgedeckt)" in coverage
     assert "3 (ohne extrahierbaren Text), 4 (nicht abgedeckt)" in coverage
     assert "5 (alle Textzeilen übermittelt)" in coverage
@@ -184,4 +184,39 @@ def test_related_distant_windows_are_compared_before_local_sampling(
     findings, _, coverage = semantic.semantic_review(pages, config)
     assert calls == [([1], [4]), ([3], [])]
     assert len(findings) == 1
-    assert coverage.startswith("2/10")
+    assert coverage.startswith("2/2")
+
+
+def test_full_document_covers_hem_with_one_cross_comparison(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run every local window of the actual 136-page estimate before cross-window work.
+
+    :param monkeypatch: replace Ollama with an empty valid response.
+    """
+    path = Path(__file__).resolve().parents[1] / "data/raw/HEM2301-2_Gesamt-LV.pdf"
+    with pymupdf.open(path) as document:
+        pages, _ = extract(document)
+    reviewed = set()
+    requests = []
+
+    def respond(config: semantic.SemanticConfig, payload: dict) -> list:
+        """Record every submitted physical page.
+
+        :param config: inference settings.
+        :param payload: one or two source windows.
+        :returns: an empty findings list.
+        """
+        assert config.full_document
+        requests.append(bool(payload["right"]))
+        reviewed.update(line["page"] for side in ("left", "right") for line in payload[side])
+        return []
+
+    monkeypatch.setattr(semantic, "_request", respond)
+    _, warnings, coverage = semantic.semantic_review(
+        pages, semantic.SemanticConfig("", "test", max_requests=1, full_document=True)
+    )
+    assert reviewed == set(range(1, 137))
+    assert len(requests) == 104 and requests == [False] * 103 + [True]
+    assert "136 (alle Textzeilen" in coverage
+    assert not any("Teil des extrahierten" in warning for warning in warnings)

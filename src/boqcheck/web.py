@@ -4,6 +4,7 @@ import argparse
 import re
 import sqlite3
 from collections.abc import Callable
+from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 from socketserver import ThreadingMixIn
@@ -338,6 +339,8 @@ def make_app(
                 name = query.get("name", ["upload.pdf"])[0][:200]
                 identifier = uuid4().hex
                 selected = semantic if query.get("semantic") == ["1"] else None
+                if selected and query.get("coverage") == ["full"]:
+                    selected = replace(selected, full_document=True)
                 trade = query.get("trade", [""])[0].strip()[:120]
                 templates = model_patterns(history_db, trade) if history_db else []
                 result, original = _analyse(env, name, directory / identifier, selected, templates)

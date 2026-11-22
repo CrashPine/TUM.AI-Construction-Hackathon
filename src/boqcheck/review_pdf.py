@@ -80,8 +80,8 @@ def _model_batch(
     state["attempts"] += used
     state["outcomes"].update(outcomes)
     if checkpoint is None and semantic is not None:
-        if used < semantic.max_requests:
-            config = replace(semantic, max_requests=semantic.max_requests - used)
+        if semantic.full_document or used < semantic.max_requests:
+            config = replace(semantic, max_requests=max(0, semantic.max_requests - used))
             general, state["warnings"], state["coverage"] = semantic_review(
                 pages, config, focus=focus
             )

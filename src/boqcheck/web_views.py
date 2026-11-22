@@ -98,7 +98,10 @@ form.addEventListener('submit', async (event) => {
     const query = new URLSearchParams({name: file.name});
     const trade = document.querySelector('#history-trade')?.value.trim();
     if (trade) query.set('trade', trade);
-    if (model?.checked && !model.disabled) query.set('semantic', '1');
+    if (model?.checked && !model.disabled) {
+      query.set('semantic', '1');
+      query.set('coverage', document.querySelector('#coverage').value);
+    }
     const response = await fetch('/upload?' + query, {
       method: 'POST', headers: {'Content-Type': type}, body: file
     });
@@ -159,7 +162,10 @@ def upload_view(model: str | None = None, *, history: bool = False) -> str:
     option = (
         f'<label><input type="checkbox" id="semantic" disabled> '
         f"Lokales Modell für PDF verwenden ({escape(model)})</label>"
-        '<p class="badge">Die Modellprüfung kann mehrere Minuten dauern. Der Bericht '
+        '<label for="coverage">Umfang der Modellprüfung</label>'
+        '<select id="coverage"><option value="full">Alle Textabschnitte</option>'
+        '<option value="quick">Stichprobe (schnell)</option></select>'
+        '<p class="badge">Bei langen PDFs kann die Prüfung lange dauern. Der Bericht '
         "zeigt, welche Vergleiche abgeschlossen wurden.</p>"
         if model
         else ""
@@ -571,6 +577,11 @@ def review_view(
     content.append(_history_comparison(result, report))
     if not findings:
         content.append("<p>Keine aktiven Befunde.</p>")
+        if result.get("semantic_model"):
+            content.append(
+                "<p>Das Ergebnis gilt für die ausgeführten Vergleiche. "
+                "Nicht abgedeckte Abschnitte bleiben ungeprüft.</p>"
+            )
     if findings and not report:
         content.append(f'<form method="post" action="{base}">')
     attachment = result.get("attachment")
