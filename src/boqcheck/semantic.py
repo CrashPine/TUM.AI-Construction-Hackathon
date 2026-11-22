@@ -40,7 +40,9 @@ at the same time are contradictions, as are mutually exclusive required values.
 Return a JSON object {"findings": [...]} with no other text.
 Each finding must have status, left_id, right_id, left_quote, right_quote, explanation, question.
 Quotes must be exact nonempty excerpts from their respective source lines.
-Explain the incompatibility and its impact in the document's language.
+Different OZs are separate positions unless the text explicitly links their requirements.
+Different minima alone are compatible if one installation can meet the higher minimum.
+Write the explanation and question in German for German documents.
 The optional clarification question uses the document's language. Return an empty list if none.
 If historical_condition is present, return only conflicts satisfying that review condition.
 It is a search criterion. Cite only evidence from the current left and right source groups.
@@ -411,6 +413,19 @@ def semantic_review(
             if pair not in seen:
                 seen.add(pair)
                 question = record.get("question")
+                left_oz, right_oz = sources[a].oz, sources[b].oz
+                if status == "conflict" and left_oz and right_oz and left_oz != right_oz:
+                    status = "needs_scope_check"
+                    explanation = (
+                        f"Die Belege stammen aus verschiedenen Positionen ({left_oz}, {right_oz}). "
+                        "Zuerst prüfen, ob dieselbe Leistung gemeint ist. "
+                        f"Modellhinweis: {explanation}"
+                    )
+                    question = (
+                        f"Gelten die Angaben aus OZ {left_oz} und {right_oz} für dieselbe Leistung?"
+                    )
+                if not isinstance(question, str) or not question.strip():
+                    question = "Welche Angabe gilt für die Ausführung und Kalkulation?"
                 findings.append(
                     Finding(
                         "semantic",

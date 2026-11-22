@@ -220,3 +220,16 @@ def test_full_document_covers_hem_with_one_cross_comparison(
     assert len(requests) == 104 and requests == [False] * 103 + [True]
     assert "136 (alle Textzeilen" in coverage
     assert not any("Teil des extrahierten" in warning for warning in warnings)
+
+
+def test_hem_layout_assigns_source_position_numbers() -> None:
+    """Retain source positions for aligned OZ cells without a trailing dot."""
+    path = Path(__file__).resolve().parents[1] / "data/raw/HEM2301-2_Gesamt-LV.pdf"
+    with pymupdf.open(path) as document:
+        pages, _ = extract(document)
+    for page, fragment, position in (
+        (79, "mind. 900 m3/h", "03.02.3"),
+        (104, "DN 125, PN 10", "05.01.46"),
+        (133, "mind. 250 m3/h", "07.01.2"),
+    ):
+        assert next(line.oz for line in pages[page - 1] if fragment in line.text) == position
