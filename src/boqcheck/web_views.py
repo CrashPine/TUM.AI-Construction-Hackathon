@@ -85,7 +85,15 @@ form.addEventListener('submit', async (event) => {
   const status = document.querySelector('#progress');
   const button = form.querySelector('button');
   button.disabled = true;
-  status.textContent = 'Datei wird geprüft …';
+  const started = Date.now();
+  let stage = model?.checked && !model.disabled
+    ? 'Datei und lokales Modell werden geprüft'
+    : 'Datei wird geprüft';
+  const updateStatus = () => {
+    status.textContent = stage + ' … ' + Math.floor((Date.now() - started) / 1000) + ' s';
+  };
+  updateStatus();
+  const timer = setInterval(updateStatus, 1000);
   try {
     const query = new URLSearchParams({name: file.name});
     const trade = document.querySelector('#history-trade')?.value.trim();
@@ -97,6 +105,8 @@ form.addEventListener('submit', async (event) => {
     if (!response.ok) throw new Error(await response.text());
     const attachment = document.querySelector('#attachment').files[0];
     if (attachment) {
+      stage = 'Anlage wird geprüft';
+      updateStatus();
       const params = new URLSearchParams({name: attachment.name});
       const added = await fetch(response.url + '/attachment?' + params, {
         method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: attachment
@@ -115,6 +125,8 @@ form.addEventListener('submit', async (event) => {
   } catch (error) {
     status.textContent = 'Prüfung fehlgeschlagen. ' + error.message;
     button.disabled = false;
+  } finally {
+    clearInterval(timer);
   }
 });
 </script>
@@ -147,6 +159,8 @@ def upload_view(model: str | None = None, *, history: bool = False) -> str:
     option = (
         f'<label><input type="checkbox" id="semantic" disabled> '
         f"Lokales Modell für PDF verwenden ({escape(model)})</label>"
+        '<p class="badge">Die Modellprüfung kann mehrere Minuten dauern. Der Bericht '
+        "zeigt, welche Vergleiche abgeschlossen wurden.</p>"
         if model
         else ""
     )

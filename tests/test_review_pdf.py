@@ -182,3 +182,36 @@ def test_shaft_model_receives_both_sources_first(
     )
     (finding,) = result["findings"]
     assert "Modellbefund an denselben Quellen" in finding["method"]
+
+
+@pytest.mark.parametrize(
+    ("other", "label", "expected"),
+    [
+        ("200 mm", "", True),
+        ("10 cm", "", False),
+        ("200 mm", "Wahlweise\n", False),
+    ],
+)
+def test_explicit_specification_values(
+    tmp_path: Path, other: str, label: str, expected: bool
+) -> None:
+    """Compare complete labelled values and leave declared alternatives alone.
+
+    :param tmp_path: isolated artifact directory.
+    :param other: second thickness.
+    :param label: optional marker defining alternatives.
+    :param expected: whether the two citations require review.
+    """
+    with pymupdf.open() as doc:
+        doc.new_page().insert_text(
+            (72, 72), f"01.01.0010. Dachplatte\nDicke: 100 mm\n{label}Dicke: {other}"
+        )
+        data = doc.tobytes()
+    result = review_pdf("spec.pdf", data, tmp_path / "result")
+    findings = result["findings"]
+    assert bool(findings) is expected
+    if expected:
+        assert [source["excerpt"] for source in findings[0]["sources"]] == [
+            "Dicke: 100 mm",
+            f"Dicke: {other}",
+        ]

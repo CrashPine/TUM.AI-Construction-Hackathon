@@ -220,6 +220,10 @@ def review_pdf(
                     "Materialanforderung",
                     "Die geforderte Körnung wirkt sich auf die Materialkalkulation aus.",
                 ),
+                "conflicting_specification": (
+                    "Widersprüchliche Spezifikation",
+                    "Die Ausführung kann den Material- oder Arbeitsaufwand ändern.",
+                ),
                 "open_scope": (
                     "Unklare Leistungsbeschreibung",
                     "Der Aufwand für Material oder Ausführung bleibt offen.",

@@ -10,6 +10,20 @@ finds errors and risks in them and gives the estimator a risk report before the 
 and a standalone HTML risk report.
 [AGENTS.md](AGENTS.md) has the commands and the rules for coding agents.
 
+## Start on Windows
+
+From the repository root, run:
+
+```powershell
+.\start-bidguard.ps1
+```
+
+The launcher checks the local Ollama model, installs locked dependencies, and starts
+the web app. Open the loopback URL printed in the terminal and enable the model
+checkbox on a PDF upload. The default budget is one comparison. For a broader,
+slower review pass `-Comparisons 6`. Use `-Port 8001` if port 8000 is occupied,
+`-OllamaPort 11434` for that Ollama instance, or `-RulesOnly` for offline checks.
+
 ## Local PDF contradiction review
 
 The PDF checks also flag explicitly open specifications and compensation terms when the

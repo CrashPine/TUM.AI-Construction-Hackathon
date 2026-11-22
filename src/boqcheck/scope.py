@@ -1,6 +1,7 @@
 """Detect explicit open scope or pricing conditions in German LV positions."""
 
 import re
+from decimal import Decimal
 from itertools import groupby
 
 from .contradictions import Finding
@@ -27,6 +28,66 @@ _INCLUDED = re.compile(
 )
 _POSITION = re.compile(r"^\d+(?:\.\d+){2,}[A-Za-z]?\.\s*")
 _GENERAL = re.compile(r"^Für alle Positionen\s*:\s*", re.I)
+
+
+_PROPERTY = re.compile(rf"({'|'.join(_FIELDS)})\s*:\s*(.+?)\.?$", re.I)
+
+
+def _property(text: str) -> tuple[str, str] | None:
+    """Parse one complete, unconditional labelled value.
+
+    :param text: wording of one source line.
+    :returns: field and normalized value, or None for unsupported wording.
+    """
+    m = _PROPERTY.fullmatch(text.strip())
+    if not m:
+        return None
+    key, raw = m[1].casefold(), m[2]
+    if re.fullmatch(_OPEN, raw, re.I):
+        return key, "open"
+    if not re.fullmatch(_FIELDS[key][1], raw, re.I):
+        return key, "unknown"
+    if key in ("dicke", "schichtdicke"):
+        n, unit = re.fullmatch(r"(\d+(?:[,.]\d+)?)\s*(mm|cm|m)", raw, re.I).groups()
+        return key, str(
+            (
+                Decimal(n.replace(",", ".")) * {"m": 1000, "cm": 10, "mm": 1}[unit.lower()]
+            ).normalize()
+        )
+    return key, {"an": "auftragnehmer", "ag": "auftraggeber", "bauseits": "auftraggeber"}.get(
+        raw.casefold(), raw.casefold()
+    )
+
+
+def _conflicting_fields(oz: str, lines: list[Line]) -> list[Finding]:
+    """Find differing explicit values of one property inside the same position.
+
+    :param oz: original position identifier.
+    :param lines: source lines belonging to the position.
+    :returns: candidates requiring a check of scopes and variants.
+    """
+    values: dict[str, dict[str, Line]] = {}
+    for line in lines:
+        if (field := _property(line.text)) and field[1] not in {"open", "unknown"}:
+            values.setdefault(field[0], {}).setdefault(field[1], line)
+    findings = []
+    if any(re.search(r"\b(?:alternativ|wahlweise|variante)\b", line.text, re.I) for line in lines):
+        return findings
+    for key, alternatives in values.items():
+        if len(alternatives) < 2:
+            continue
+        left, right, *_ = alternatives.values()
+        label = _FIELDS[key][0]
+        findings.append(
+            Finding(
+                "conflicting_specification",
+                ((left,), (right,)),
+                f"OZ {oz} enthält verschiedene Angaben zu {label}. "
+                "Es ist zu prüfen, ob beide Angaben für dieselbe Ausführung gelten.",
+                f"Welche Angabe zu {label} ist für OZ {oz} zu kalkulieren?",
+            )
+        )
+    return findings
 
 
 def _title(lines: list[Line]) -> str:
@@ -58,6 +119,7 @@ def find_scope_questions(pages: list[list[Line]]) -> list[Finding]:
     for index, (oz, lines) in enumerate(groups):
         if not oz:
             continue
+        findings.extend(_conflicting_fields(oz, lines))
         title = _title(lines)
         related = list(lines)
         for adjacent, neighbor in groups[max(0, index - 1) : index + 2]:

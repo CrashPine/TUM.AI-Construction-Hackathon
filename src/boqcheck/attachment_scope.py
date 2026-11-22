@@ -2,12 +2,11 @@
 
 import re
 from collections import defaultdict
-from decimal import Decimal
 from hashlib import sha256
 from itertools import chain, groupby
 
 from .pdf_extract import Line
-from .scope import _FIELDS, _OPEN
+from .scope import _FIELDS, _property
 
 # A two-level OZ (one section level, as in some GAEB files) counts only after an explicit "OZ",
 # because amounts such as "1.000 Stück" also have two levels.
@@ -17,7 +16,6 @@ _HEADING = re.compile(
 # A DOCX heading can end with the unit in brackets ("[Mt.]"), which an LV keeps in its own
 # column. Placeholders such as [FIRMA_096] replace words of the Kurztext, so they stay.
 _UNIT = re.compile(r"\s+\[[^\s\[\]_]+\]$")
-_PROPERTY = re.compile(rf"({'|'.join(_FIELDS)})\s*:\s*(.+?)\.?$", re.I)
 
 
 def _key(oz: str, component: str) -> tuple:
@@ -43,32 +41,6 @@ def _heading_key(text: str) -> tuple | None:
     """
     heading = _HEADING.fullmatch(text.strip())
     return _key(heading[1], _UNIT.sub("", heading[2])) if heading else None
-
-
-def _property(text: str) -> tuple[str, str] | None:
-    """Parse one complete, unconditional labelled value.
-
-    :param text: wording of one source line.
-    :returns: field and normalized value, or None for unsupported wording.
-    """
-    m = _PROPERTY.fullmatch(text.strip())
-    if not m:
-        return None
-    key, raw = m[1].casefold(), m[2]
-    if re.fullmatch(_OPEN, raw, re.I):
-        return key, "open"
-    if not re.fullmatch(_FIELDS[key][1], raw, re.I):
-        return key, "unknown"
-    if key in ("dicke", "schichtdicke"):
-        n, unit = re.fullmatch(r"(\d+(?:[,.]\d+)?)\s*(mm|cm|m)", raw, re.I).groups()
-        return key, str(
-            (
-                Decimal(n.replace(",", ".")) * {"m": 1000, "cm": 10, "mm": 1}[unit.lower()]
-            ).normalize()
-        )
-    return key, {"an": "auftragnehmer", "ag": "auftraggeber", "bauseits": "auftraggeber"}.get(
-        raw.casefold(), raw.casefold()
-    )
 
 
 def _component(rows: list[Line]) -> str | None:
@@ -178,9 +150,7 @@ def compare_attachment(result: dict, attachment: dict) -> dict:
             number = int(entry["id"][1:])
             for j in range(i + 1, len(entries)):
                 evidence = entries[j]
-                if evidence["id"] != f"P{number + j - i}" or not _PROPERTY.fullmatch(
-                    evidence["text"]
-                ):
+                if evidence["id"] != f"P{number + j - i}" or not _property(evidence["text"]):
                     break
                 evidence_rows.append((evidence, evidence["text"]))
         for evidence, raw in evidence_rows:

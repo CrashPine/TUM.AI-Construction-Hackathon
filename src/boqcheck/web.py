@@ -6,10 +6,12 @@ import sqlite3
 from collections.abc import Callable
 from hashlib import sha256
 from pathlib import Path
+from socketserver import ThreadingMixIn
 from tempfile import TemporaryDirectory
+from threading import Lock
 from urllib.parse import parse_qs
 from uuid import uuid4
-from wsgiref.simple_server import make_server
+from wsgiref.simple_server import WSGIServer, make_server
 
 from . import what_if
 from .attachment_scope import compare_attachment
@@ -34,6 +36,33 @@ from .xlsx_lv import read_xlsx
 
 _RUN = re.compile(r"/review/([a-f0-9]{32})(?:/(pdf|log|report|resume|attachment|whatif))?")
 _MAX_UPLOAD = 32 * 1024 * 1024
+
+
+class _LocalServer(ThreadingMixIn, WSGIServer):
+    """Keep read-only pages responsive while a model request is running."""
+
+
+def _serialize_writes(application: Callable) -> Callable:
+    """Run one mutation at a time, protecting PDF operations and review state.
+
+    :param application: local review application.
+    :returns: an application that serializes POST requests.
+    """
+    lock = Lock()
+
+    def dispatch(env: dict, start_response: Callable) -> list[bytes]:
+        """Allow navigation and exports during an upload or model call.
+
+        :param env: WSGI request environment.
+        :param start_response: callback for status and headers.
+        :returns: response chunks from the review application.
+        """
+        if env["REQUEST_METHOD"] == "POST":
+            with lock:
+                return application(env, start_response)
+        return application(env, start_response)
+
+    return dispatch
 
 
 def _read_body(env: dict, limit: int, *, media_type: str) -> bytes:
@@ -473,7 +502,9 @@ def main() -> None:
         application = make_app(
             Path(temporary), history_db=args.history_db, semantic=semantic, dataset=dataset
         )
-        with make_server("127.0.0.1", args.port, application) as server:
+        with make_server(
+            "127.0.0.1", args.port, _serialize_writes(application), server_class=_LocalServer
+        ) as server:
             print(f"BidGuard AI · http://127.0.0.1:{server.server_port}", flush=True)
             try:
                 server.serve_forever()
