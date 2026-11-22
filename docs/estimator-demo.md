@@ -44,6 +44,51 @@ Limitations:
   include later reviewer edits; the HTML report does.
 - The 91-page PDF review took about 1.3 s on one development machine; other machines differ.
 
+## PDF price table with a separate quantity row
+
+Besides the two priced EUR layouts, the PDF price check reads the table of 29 unpriced sample
+PDFs: the `LV_*` files, `Leistungsverzeichnis.pdf` and `LV-Schachtbauwerk.pdf`. On each page,
+the header row holds `OZ` or `Ordnungszahl`, `Leistungsbeschreibung`, `Menge ME`,
+`Einheitspreis` and `Gesamtbetrag` on one baseline; the column edges come from these cells.
+The OZ row comes first. The last row of the position holds `<Menge> <ME>` in the Menge ME
+column and the price fields, which end at the right edges of the two price headers. This
+quantity row takes its OZ from the position above it. Each quantity row is one of these:
+
+- Both fields are numbers: Menge × Einheitspreis, rounded half up to the cent, must equal the
+  Gesamtbetrag. A difference gives a finding with the calculation. The header names no
+  currency, so the explanation has no `EUR` and gives the price basis as `je Mengeneinheit`.
+- A dotted field is blank (`Preisfelder leer`), never 0. A `psch` row without an Einheitspreis
+  cell is never computed; with a dotted Gesamtbetrag it is blank.
+- `Nur Einh.-Pr.` in the Gesamtbetrag column: no total to check (`nur Einheitspreis`).
+- A row without an OZ, or with an OZ that has a second quantity row, is never computed, because
+  a finding would cite the wrong position (`ohne eindeutige OZ`).
+
+A filled `Summe <OZ>.` row is compared with the sum of the Gesamtbeträge under that OZ, without
+the `Nur Einh.-Pr.` rows. The comparison is inconclusive if a member row is blank or not computed,
+if any quantity row has no unique OZ, if an OZ under the prefix has no recognised quantity row,
+or if a member is marked as a Bedarfsposition or another optional item. `Übertrag` rows are not
+section totals.
+
+The quantity rows count into `EP/GP-Tabellen` and the `Summe` rows into `Abschnittssummen`.
+If such rows are found, one sentence follows, for example `Mengenzeilen: 7 Preisfelder leer,
+4 nur Einheitspreis, 0 ohne eindeutige OZ; 2 Summenzeilen leer.` `Preisfelder leer` and `nur
+Einheitspreis` never overlap. `ohne eindeutige OZ` counts every row without a unique OZ, whatever
+its fields, so it can overlap both; a filled row without a unique OZ is counted only there.
+
+In the 29 samples, no price field is filled: 1,367 quantity rows (1,233 blank, including 11
+`psch` rows; 134 `Nur Einh.-Pr.`) and 147 `Summe` rows. 468 rows have no unique OZ: all rows of
+`LV_13_ELT.pdf` and the four `LV_14` files, and 7 rows in four other files.
+
+Limitations:
+
+- No priced sample has this layout. The computation and the `Summe` comparison are tested on a
+  synthetic PDF with the header geometry of `LV_02_PVC_Fussbodenbelag.pdf` only.
+- 67 quantity rows are not recognised: in 57 rows of 7 files, the quantity and the dotted
+  Einheitspreis are one text line; 10 rows of 3 files have no unit. A `Summe` over such a
+  position stays inconclusive.
+- `Zusammenstellung` pages, `Summe LV` rows and 5 `Summe` rows without an amount field
+  (Stundenlohnarbeiten) are not counted.
+
 ## Explicit what-if calculation
 
 A GAEB or XLSX review has a **Was-wäre-wenn-Rechnung** form. Choose a position, the
