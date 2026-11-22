@@ -27,6 +27,8 @@ class SectionTotals:
     excluded: set[str] = field(default_factory=set)
     markers: dict[str, tuple[Line, ...]] = field(default_factory=dict)
     ambiguous: bool = False
+    # Suffix of amounts in explanations; empty for a table whose header names no currency.
+    currency: str = " EUR"
     stated: int = 0
     checked: int = 0
     findings: list[Finding] = field(default_factory=list)
@@ -116,8 +118,8 @@ class SectionTotals:
                 Finding(
                     "section_total",
                     (tuple(row), *((line,) for _, _, line in members), *self.markers.values()),
-                    f"Abschnitt {self.section}: {terms} = {expected} EUR. "
-                    f"Ausgewiesen: {actual} EUR.{exclusions}",
+                    f"Abschnitt {self.section}: {terms} = {expected}{self.currency}. "
+                    f"Ausgewiesen: {actual}{self.currency}.{exclusions}",
                     "Welcher Gesamtbetrag gilt für diesen Abschnitt?",
                     "conflict",
                 )
